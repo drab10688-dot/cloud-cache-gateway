@@ -25,6 +25,47 @@ warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 [ "$EUID" -ne 0 ] && error "Ejecuta como root: sudo bash install.sh"
+
+# ── Modo desinstalar ──
+if [ "$1" = "--uninstall" ] || [ "$1" = "uninstall" ]; then
+  echo ""
+  echo -e "${RED}══════════════════════════════════════════════════════${NC}"
+  echo -e "${RED}   NetAdmin — DESINSTALACIÓN COMPLETA${NC}"
+  echo -e "${RED}══════════════════════════════════════════════════════${NC}"
+  echo ""
+  read -p "¿Estás seguro? Se eliminarán TODOS los contenedores, datos y configuraciones. (s/n) [n]: " CONFIRM
+  if [ "${CONFIRM,,}" != "s" ]; then
+    echo "Cancelado."
+    exit 0
+  fi
+
+  log "Deteniendo y eliminando contenedores..."
+  cd /opt/netadmin 2>/dev/null && docker compose down --rmi all --volumes --remove-orphans 2>/dev/null || true
+
+  log "Eliminando directorio /opt/netadmin..."
+  rm -rf /opt/netadmin
+
+  log "Eliminando comandos netadmin..."
+  rm -f /usr/local/bin/netadmin /usr/local/bin/netadmin-tunnel
+
+  log "Restaurando systemd-resolved..."
+  systemctl enable systemd-resolved 2>/dev/null || true
+  systemctl start systemd-resolved 2>/dev/null || true
+
+  read -p "¿Desinstalar Docker también? (s/n) [n]: " REMOVE_DOCKER
+  if [ "${REMOVE_DOCKER,,}" = "s" ]; then
+    log "Desinstalando Docker..."
+    apt-get purge -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin docker-ce-rootless-extras docker-model-plugin 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+    rm -rf /var/lib/docker /var/lib/containerd
+    success "Docker desinstalado"
+  fi
+
+  success "NetAdmin desinstalado completamente"
+  echo ""
+  exit 0
+fi
+
 grep -qi "ubuntu" /etc/os-release || error "Solo para Ubuntu Server"
 
 IP_ADDR=$(hostname -I | awk '{print $1}')
