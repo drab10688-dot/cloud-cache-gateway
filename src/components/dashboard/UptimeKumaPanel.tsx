@@ -3,7 +3,8 @@ import { HeartPulse, ExternalLink, Plus, Settings, RefreshCw, Loader2 } from "lu
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
-const KUMA_URL = "/kuma/";
+// Use direct port access — more reliable than reverse proxy
+const KUMA_URL = typeof window !== "undefined" ? `http://${window.location.hostname}:3001` : "/kuma/";
 
 interface Monitor {
   id: number;
