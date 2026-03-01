@@ -21,7 +21,7 @@ const Index = () => {
       case "cache": return <CacheStats />;
       case "adguard": return <AdGuardPanel />;
       case "cloudflare": return <CloudflarePanel />;
-      case "installer": return <InstallerPanel onNavigate={setActiveSection} />;
+      case "installer": return <InstallerPanel />;
     }
   };
 
