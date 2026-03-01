@@ -4,10 +4,10 @@ import { StatusOverview } from "@/components/dashboard/StatusOverview";
 import { PingMonitor } from "@/components/dashboard/PingMonitor";
 import { DnsBlocklist } from "@/components/dashboard/DnsBlocklist";
 import { CacheStats } from "@/components/dashboard/CacheStats";
-import { WireGuardPanel } from "@/components/dashboard/WireGuardPanel";
+import { AdGuardPanel } from "@/components/dashboard/AdGuardPanel";
 import { CloudflarePanel } from "@/components/dashboard/CloudflarePanel";
 
-export type Section = "overview" | "ping" | "dns" | "cache" | "wireguard" | "cloudflare";
+export type Section = "overview" | "ping" | "dns" | "cache" | "adguard" | "cloudflare";
 
 const Index = () => {
   const [activeSection, setActiveSection] = useState<Section>("overview");
@@ -18,7 +18,7 @@ const Index = () => {
       case "ping": return <PingMonitor />;
       case "dns": return <DnsBlocklist />;
       case "cache": return <CacheStats />;
-      case "wireguard": return <WireGuardPanel />;
+      case "adguard": return <AdGuardPanel />;
       case "cloudflare": return <CloudflarePanel />;
     }
   };
