@@ -110,4 +110,5 @@ export const api = {
   blockQuic: () => apiFetch('/network/quic-block', { method: 'POST' }),
   unblockQuic: () => apiFetch('/network/quic-unblock', { method: 'POST' }),
   getVideoStats: () => apiFetch('/network/video-stats'),
+  getTcpOptimization: () => apiFetch('/network/tcp-optimization'),
 };

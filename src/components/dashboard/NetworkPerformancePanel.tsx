@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { Zap, ShieldOff, ShieldCheck, Loader2, Wifi, MonitorSpeaker, TrendingDown, TrendingUp, Info, BarChart3 } from "lucide-react";
+import { Zap, ShieldOff, ShieldCheck, Loader2, Wifi, MonitorSpeaker, TrendingDown, TrendingUp, Info, BarChart3, Gauge, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
@@ -16,20 +16,34 @@ interface VideoStats {
   top_domains: { domain: string; hits: number; cached: number }[];
 }
 
+interface TcpOptimization {
+  bbr_active: boolean;
+  congestion_control: string;
+  qdisc: string;
+  tcp_fastopen: boolean;
+  rmem_max: number;
+  wmem_max: number;
+  tw_reuse: boolean;
+  window_scaling: boolean;
+}
+
 export function NetworkPerformancePanel() {
   const [quicStatus, setQuicStatus] = useState<QuicStatus>({ blocked: false, rules_active: false });
   const [videoStats, setVideoStats] = useState<VideoStats | null>(null);
+  const [tcpOpt, setTcpOpt] = useState<TcpOptimization | null>(null);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
-      const [quic, video] = await Promise.all([
+      const [quic, video, tcp] = await Promise.all([
         api.getQuicStatus(),
         api.getVideoStats(),
+        api.getTcpOptimization(),
       ]);
       setQuicStatus(quic);
       setVideoStats(video);
+      setTcpOpt(tcp);
     } catch {
       // offline
     } finally {
@@ -62,9 +76,9 @@ export function NetworkPerformancePanel() {
   return (
     <div>
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-foreground">Rendimiento UDP / QUIC y Video</h2>
+        <h2 className="text-2xl font-bold text-foreground">Rendimiento de Red — TCP BBR & QUIC</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Controla el protocolo QUIC para maximizar el caché de video
+          Optimización TCP BBR, control QUIC y caché de video
         </p>
       </div>
 
@@ -183,6 +197,77 @@ export function NetworkPerformancePanel() {
               <span className="text-xs text-muted-foreground">{r.desc}</span>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* TCP BBR Optimization */}
+      <div className="card-glow rounded-lg p-5 mb-6">
+        <div className="flex items-start gap-3">
+          <Gauge className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+          <div className="w-full">
+            <h3 className="text-sm font-semibold text-foreground mb-3">Optimización TCP (Kernel)</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                {
+                  label: "TCP BBR",
+                  active: tcpOpt?.bbr_active ?? false,
+                  detail: tcpOpt?.congestion_control ?? "—",
+                  desc: "Algoritmo de congestión de Google",
+                },
+                {
+                  label: "FastOpen",
+                  active: tcpOpt?.tcp_fastopen ?? false,
+                  detail: tcpOpt?.tcp_fastopen ? "Activo" : "Inactivo",
+                  desc: "Datos en el primer SYN",
+                },
+                {
+                  label: "Window Scaling",
+                  active: tcpOpt?.window_scaling ?? false,
+                  detail: tcpOpt?.window_scaling ? "Activo" : "Inactivo",
+                  desc: "Ventanas TCP grandes",
+                },
+                {
+                  label: "TW Reuse",
+                  active: tcpOpt?.tw_reuse ?? false,
+                  detail: tcpOpt?.tw_reuse ? "Activo" : "Inactivo",
+                  desc: "Reutilizar conexiones TIME_WAIT",
+                },
+              ].map((opt) => (
+                <div key={opt.label} className={`rounded-md p-3 border transition-all ${
+                  opt.active ? "bg-success/5 border-success/30" : "bg-secondary/30 border-border"
+                }`}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    {opt.active ? (
+                      <CheckCircle className="h-3.5 w-3.5 text-success" />
+                    ) : (
+                      <XCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                    <span className="text-xs font-semibold text-foreground">{opt.label}</span>
+                  </div>
+                  <p className={`text-sm font-mono font-bold ${opt.active ? "text-success" : "text-muted-foreground"}`}>
+                    {opt.detail}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{opt.desc}</p>
+                </div>
+              ))}
+            </div>
+            {tcpOpt && (
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="bg-secondary/30 rounded-md p-2.5">
+                  <p className="text-xs text-muted-foreground">Buffer Recepción (rmem_max)</p>
+                  <p className="text-sm font-mono font-bold text-foreground">
+                    {tcpOpt.rmem_max > 0 ? `${(tcpOpt.rmem_max / 1048576).toFixed(0)} MB` : "—"}
+                  </p>
+                </div>
+                <div className="bg-secondary/30 rounded-md p-2.5">
+                  <p className="text-xs text-muted-foreground">Buffer Envío (wmem_max)</p>
+                  <p className="text-sm font-mono font-bold text-foreground">
+                    {tcpOpt.wmem_max > 0 ? `${(tcpOpt.wmem_max / 1048576).toFixed(0)} MB` : "—"}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

@@ -789,6 +789,29 @@ app.post('/api/network/quic-unblock', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// === TCP BBR STATUS ===
+app.get('/api/network/tcp-optimization', (req, res) => {
+  try {
+    const congestion = execSync('sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown').toString().trim();
+    const qdisc = execSync('sysctl -n net.core.default_qdisc 2>/dev/null || echo unknown').toString().trim();
+    const fastopen = execSync('sysctl -n net.ipv4.tcp_fastopen 2>/dev/null || echo 0').toString().trim();
+    const rmem = execSync('sysctl -n net.core.rmem_max 2>/dev/null || echo 0').toString().trim();
+    const wmem = execSync('sysctl -n net.core.wmem_max 2>/dev/null || echo 0').toString().trim();
+    const twReuse = execSync('sysctl -n net.ipv4.tcp_tw_reuse 2>/dev/null || echo 0').toString().trim();
+    const windowScaling = execSync('sysctl -n net.ipv4.tcp_window_scaling 2>/dev/null || echo 0').toString().trim();
+    res.json({
+      bbr_active: congestion === 'bbr',
+      congestion_control: congestion,
+      qdisc,
+      tcp_fastopen: parseInt(fastopen) >= 3,
+      rmem_max: parseInt(rmem),
+      wmem_max: parseInt(wmem),
+      tw_reuse: twReuse === '1',
+      window_scaling: windowScaling === '1',
+    });
+  } catch { res.json({ bbr_active: false, congestion_control: 'unknown', qdisc: 'unknown', tcp_fastopen: false, rmem_max: 0, wmem_max: 0, tw_reuse: false, window_scaling: false }); }
+});
+
 app.get('/api/network/video-stats', (req, res) => {
   try {
     const lines = fs.readFileSync('/data/squid-logs/access.log', 'utf8').trim().split('\n').slice(-5000);
@@ -1430,7 +1453,47 @@ MGMT
 chmod +x /usr/local/bin/netadmin
 
 # ============================================================
-# 13. FIREWALL
+# 13. TCP BBR + KERNEL OPTIMIZATION
+# ============================================================
+log "Optimizando kernel TCP (BBR + FastOpen + buffers)..."
+
+# Activar TCP BBR (mejor throughput y menor latencia)
+cat >> /etc/sysctl.conf << 'SYSCTL_TCP'
+
+# === NetAdmin: TCP Optimization ===
+# TCP BBR congestion control (Google)
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+
+# TCP FastOpen (reduce latencia en conexiones nuevas)
+net.ipv4.tcp_fastopen=3
+
+# Buffer optimization
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.ipv4.tcp_rmem=4096 87380 16777216
+net.ipv4.tcp_wmem=4096 65536 16777216
+net.core.netdev_max_backlog=5000
+
+# Connection tracking optimization
+net.ipv4.tcp_max_syn_backlog=8192
+net.ipv4.tcp_tw_reuse=1
+net.ipv4.tcp_fin_timeout=15
+net.ipv4.tcp_keepalive_time=300
+net.ipv4.tcp_keepalive_intvl=15
+net.ipv4.tcp_keepalive_probes=5
+
+# Enable window scaling
+net.ipv4.tcp_window_scaling=1
+net.ipv4.tcp_timestamps=1
+net.ipv4.tcp_sack=1
+SYSCTL_TCP
+
+sysctl -p > /dev/null 2>&1
+success "TCP BBR + optimizaciones de kernel aplicadas"
+
+# ============================================================
+# 14. FIREWALL
 # ============================================================
 log "Configurando firewall..."
 apt-get install -y -qq ufw
@@ -1466,6 +1529,11 @@ echo -e "    Squid (Video):     ${GREEN}${SQUID_CACHE_GB} GB${NC} (RAM: ${SQUID_
 echo -e "    Lancache:          ${GREEN}${LANCACHE_CACHE_GB} GB${NC} (RAM: ${LANCACHE_CACHE_MEM} GB)"
 echo -e "    Nginx CDN:         ${GREEN}${NGINX_CACHE_GB} GB${NC}"
 echo -e "    Total:             ${GREEN}$((SQUID_CACHE_GB + LANCACHE_CACHE_GB + NGINX_CACHE_GB)) GB${NC}"
+echo ""
+echo -e "  ${CYAN}TCP Optimización:${NC}"
+echo -e "    Congestión:        ${GREEN}BBR (Google)${NC}"
+echo -e "    FastOpen:          ${GREEN}Activo${NC}"
+echo -e "    Buffers TCP:       ${GREEN}16 MB${NC}"
 echo ""
 echo -e "${CYAN}  ┌──────────────────────────────────────────────────┐${NC}"
 echo -e "${CYAN}  │  CONFIGURACIÓN DNS PARA TUS CLIENTES             │${NC}"
