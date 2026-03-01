@@ -7,12 +7,16 @@ import {
   LayoutDashboard,
   Terminal,
   HeartPulse,
+  Box,
+  Globe,
 } from "lucide-react";
 import type { Section } from "@/pages/Index";
 import logoImg from "@/assets/logo.png";
 
 const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Dashboard", icon: LayoutDashboard },
+  { id: "docker", label: "Contenedores", icon: Box },
+  { id: "dnsconfig", label: "Config DNS", icon: Globe },
   { id: "ping", label: "Monitor Ping", icon: Activity },
   { id: "dns", label: "DNS / Bloqueo", icon: ShieldCheck },
   { id: "cache", label: "Caché CDN", icon: Database },

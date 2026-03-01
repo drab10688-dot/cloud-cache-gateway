@@ -8,10 +8,12 @@ import { AdGuardPanel } from "@/components/dashboard/AdGuardPanel";
 import { CloudflarePanel } from "@/components/dashboard/CloudflarePanel";
 import { InstallerPanel } from "@/components/dashboard/InstallerPanel";
 import { UptimeKumaPanel } from "@/components/dashboard/UptimeKumaPanel";
+import { DockerPanel } from "@/components/dashboard/DockerPanel";
+import { DnsConfigPanel } from "@/components/dashboard/DnsConfigPanel";
 import { LoginScreen } from "@/components/dashboard/LoginScreen";
 import { isAuthenticated } from "@/lib/api";
 
-export type Section = "overview" | "ping" | "dns" | "cache" | "adguard" | "cloudflare" | "kuma" | "installer";
+export type Section = "overview" | "ping" | "dns" | "cache" | "adguard" | "cloudflare" | "kuma" | "installer" | "docker" | "dnsconfig";
 
 const Index = () => {
   const [loggedIn, setLoggedIn] = useState(isAuthenticated());
@@ -24,6 +26,8 @@ const Index = () => {
   const renderSection = () => {
     switch (activeSection) {
       case "overview": return <StatusOverview />;
+      case "docker": return <DockerPanel />;
+      case "dnsconfig": return <DnsConfigPanel />;
       case "ping": return <PingMonitor />;
       case "dns": return <DnsBlocklist />;
       case "cache": return <CacheStats />;

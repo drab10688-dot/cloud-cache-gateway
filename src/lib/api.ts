@@ -90,4 +90,18 @@ export const api = {
     apiFetch('/tunnel/start', { method: 'POST', body: JSON.stringify({ token }) }),
   stopTunnel: () =>
     apiFetch('/tunnel/stop', { method: 'POST' }),
+
+  // Docker containers
+  getContainers: () => apiFetch('/docker/containers'),
+  startContainer: (name: string) =>
+    apiFetch('/docker/start', { method: 'POST', body: JSON.stringify({ name }) }),
+  stopContainer: (name: string) =>
+    apiFetch('/docker/stop', { method: 'POST', body: JSON.stringify({ name }) }),
+  restartContainer: (name: string) =>
+    apiFetch('/docker/restart', { method: 'POST', body: JSON.stringify({ name }) }),
+
+  // DNS config
+  getDnsConfig: () => apiFetch('/dns/config'),
+  setDnsConfig: (primary: string, secondary: string) =>
+    apiFetch('/dns/config', { method: 'POST', body: JSON.stringify({ primary, secondary }) }),
 };
