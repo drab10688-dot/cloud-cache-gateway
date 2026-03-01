@@ -59,12 +59,12 @@ export function PingMonitor() {
       <div className="card-glow rounded-lg p-5 mb-4">
         <ResponsiveContainer width="100%" height={350}>
           <LineChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(220 15% 18%)" />
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(210 15% 88%)" />
             <XAxis dataKey="time" stroke="hsl(215 15% 50%)" fontSize={10} tickLine={false} interval={Math.floor(chartData.length / 10)} />
             <YAxis stroke="hsl(215 15% 50%)" fontSize={10} tickLine={false} domain={[0, "auto"]} unit="ms" />
-            <Tooltip contentStyle={{ backgroundColor: "hsl(220 18% 10%)", border: "1px solid hsl(220 15% 18%)", borderRadius: "8px", fontSize: 12, fontFamily: "JetBrains Mono" }} />
-            <ReferenceLine y={50} stroke="hsl(38 90% 55%)" strokeDasharray="5 5" label={{ value: "Umbral", fill: "hsl(38 90% 55%)", fontSize: 10 }} />
-            <Line type="monotone" dataKey="ping" stroke="hsl(175 80% 45%)" strokeWidth={2} dot={false} connectNulls={false} activeDot={{ r: 4, fill: "hsl(175 80% 45%)" }} />
+            <Tooltip contentStyle={{ backgroundColor: "hsl(0 0% 100%)", border: "1px solid hsl(210 15% 88%)", borderRadius: "8px", fontSize: 12, fontFamily: "JetBrains Mono" }} />
+            <ReferenceLine y={50} stroke="hsl(38 90% 50%)" strokeDasharray="5 5" label={{ value: "Umbral", fill: "hsl(38 90% 50%)", fontSize: 10 }} />
+            <Line type="monotone" dataKey="ping" stroke="hsl(175 80% 35%)" strokeWidth={2} dot={false} connectNulls={false} activeDot={{ r: 4, fill: "hsl(175 80% 35%)" }} />
           </LineChart>
         </ResponsiveContainer>
       </div>
