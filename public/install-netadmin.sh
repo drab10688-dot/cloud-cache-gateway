@@ -323,7 +323,7 @@ http_port 3129 intercept
 https_port 3130 intercept ssl-bump cert=/etc/squid/ssl_cert/netadmin-ca.pem generate-host-certificates=on dynamic_cert_mem_cache_size=16MB
 
 acl step1 at_step SslBump1
-acl cacheable_ssl ssl::server_name .youtube.com .googlevideo.com .ytimg.com .windowsupdate.com .microsoft.com .download.microsoft.com
+acl cacheable_ssl ssl::server_name .youtube.com .googlevideo.com .ytimg.com .windowsupdate.com .microsoft.com
 
 ssl_bump peek step1
 ssl_bump bump cacheable_ssl
@@ -344,14 +344,15 @@ refresh_pattern ^ftp: 1440 20% 10080
 refresh_pattern -i (/cgi-bin/|\?) 0 0% 0
 refresh_pattern . 0 20% 4320
 
-acl localnet src 0.0.0.0/0
+acl localnet src all
 acl Safe_ports port 80 443 21 70 210 280 488 591 777 1025-65535
 http_access allow localnet
 http_access allow localhost
 http_access deny all
 
-access_log /var/log/squid/access.log squid
-cache_log /var/log/squid/cache.log
+access_log stdio:/var/log/squid/access.log squid
+cache_log stdio:/var/log/squid/cache.log
+visible_hostname netadmin-proxy
 visible_hostname netadmin-proxy
 SQUID_CONF
 
@@ -363,8 +364,8 @@ FROM ubuntu:24.04
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y squid-openssl openssl && \
     rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /var/cache/squid /var/log/squid /etc/squid/ssl_cert /var/spool/squid && \
-    chown -R proxy:proxy /var/cache/squid /var/log/squid /var/spool/squid
+RUN mkdir -p /var/cache/squid /var/log/squid /etc/squid/ssl_cert /var/spool/squid /run && \
+    chown -R proxy:proxy /var/cache/squid /var/log/squid /var/spool/squid /run
 COPY configs/squid.conf /etc/squid/squid.conf
 COPY certs/netadmin-ca.pem /etc/squid/ssl_cert/netadmin-ca.pem
 RUN CERTGEN=$(find /usr/lib/squid -name "security_file_certgen" -o -name "ssl_crtd" 2>/dev/null | head -1) && \
@@ -373,7 +374,7 @@ RUN CERTGEN=$(find /usr/lib/squid -name "security_file_certgen" -o -name "ssl_cr
     chown -R proxy:proxy /var/spool/squid/ssl_db
 RUN squid -z 2>/dev/null || true
 EXPOSE 3128 3129 3130
-CMD ["squid", "-N", "-d1"]
+CMD ["sh", "-c", "chown -R proxy:proxy /var/log/squid /var/cache/squid && squid -N -d1"]
 DOCKERFILE
 
 # ============================================================
