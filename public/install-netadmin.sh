@@ -1128,8 +1128,6 @@ chmod +x ${NETADMIN_DIR}/configs/cron-entry.sh
 log "Generando docker-compose.yml..."
 
 cat > ${NETADMIN_DIR}/docker-compose.yml << COMPOSE
-version: '3.8'
-
 services:
   # ── DNS Recursivo ──
   unbound:
