@@ -89,6 +89,16 @@ if ! command -v docker &>/dev/null; then
 fi
 systemctl enable docker && systemctl start docker
 
+# ── Liberar puerto 53 (systemd-resolved) ──
+if systemctl is-active --quiet systemd-resolved; then
+  log "Desactivando systemd-resolved (puerto 53 en uso)..."
+  systemctl stop systemd-resolved
+  systemctl disable systemd-resolved
+  rm -f /etc/resolv.conf
+  echo "nameserver 8.8.8.8" > /etc/resolv.conf
+  success "systemd-resolved desactivado, DNS temporal 8.8.8.8"
+fi
+
 # Instalar docker-compose plugin si no existe
 if ! docker compose version &>/dev/null; then
   COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name)
