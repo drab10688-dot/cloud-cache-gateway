@@ -683,6 +683,81 @@ app.get('/api/kuma/monitors', async (req, res) => {
   }
 });
 
+// === DOCKER CONTAINER MANAGEMENT ===
+app.get('/api/docker/containers', async (req, res) => {
+  try {
+    const containers = await docker.listContainers({ all: true });
+    const netadminContainers = containers
+      .filter(c => c.Names.some(n => n.startsWith('/netadmin-')))
+      .map(c => ({
+        name: c.Names[0].replace('/', ''),
+        displayName: c.Names[0].replace('/netadmin-', '').replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+        state: c.State,
+        status: c.Status,
+        image: c.Image,
+      }));
+    res.json(netadminContainers);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/docker/start', async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.startsWith('netadmin-')) return res.status(400).json({ error: 'Contenedor no válido' });
+    const container = docker.getContainer(name);
+    await container.start();
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/docker/stop', async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.startsWith('netadmin-')) return res.status(400).json({ error: 'Contenedor no válido' });
+    const container = docker.getContainer(name);
+    await container.stop();
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/docker/restart', async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.startsWith('netadmin-')) return res.status(400).json({ error: 'Contenedor no válido' });
+    const container = docker.getContainer(name);
+    await container.restart();
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// === DNS UPSTREAM CONFIG ===
+const DNS_CONFIG_FILE = '/data/dns-config.json';
+
+app.get('/api/dns/config', (req, res) => {
+  try {
+    const config = JSON.parse(fs.readFileSync(DNS_CONFIG_FILE, 'utf8'));
+    res.json(config);
+  } catch {
+    res.json({ primary: '8.8.8.8', secondary: '8.8.4.4' });
+  }
+});
+
+app.post('/api/dns/config', (req, res) => {
+  try {
+    const { primary, secondary } = req.body;
+    // Save config
+    fs.writeFileSync(DNS_CONFIG_FILE, JSON.stringify({ primary, secondary, updated: new Date().toISOString() }));
+    // Update Unbound forward zone
+    const fwdConf = `forward-zone:\n  name: "."\n  forward-addr: ${primary}\n  forward-addr: ${secondary}\n`;
+    fs.writeFileSync('/data/unbound/forward.conf', fwdConf);
+    // Restart Unbound to apply
+    execSync('docker restart netadmin-unbound 2>/dev/null || true');
+    res.json({ success: true, primary, secondary });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.listen(API_PORT, '0.0.0.0', () => {
   console.log(`NetAdmin API v4.0 → http://0.0.0.0:${API_PORT}`);
 });
