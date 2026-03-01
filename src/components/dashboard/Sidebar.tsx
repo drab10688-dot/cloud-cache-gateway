@@ -6,6 +6,7 @@ import {
   Shield,
   Cloud,
   LayoutDashboard,
+  Terminal,
 } from "lucide-react";
 import type { Section } from "@/pages/Index";
 
@@ -16,6 +17,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "cache", label: "Caché CDN", icon: Database },
   { id: "adguard", label: "AdGuard + Unbound", icon: Shield },
   { id: "cloudflare", label: "Cloudflare Tunnel", icon: Cloud },
+  { id: "installer", label: "Instalador", icon: Terminal },
 ];
 
 interface SidebarProps {
