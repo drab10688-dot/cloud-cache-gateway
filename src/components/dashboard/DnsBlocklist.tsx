@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Shield, Plus, Trash2, Search, Baby, AlertTriangle, Globe, RefreshCw, Clock, CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Shield, Plus, Trash2, Search, Baby, AlertTriangle, Globe, RefreshCw, Clock, CheckCircle, Loader2, Upload, FileText, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -21,7 +21,14 @@ interface UpdateStatus {
   status: string;
 }
 
-// ... keep existing code (categories, catBadgeColors)
+interface UploadResult {
+  total: number;
+  added: number;
+  duplicates: number;
+  invalid: number;
+  category: string;
+}
+
 const categories: { id: FilterCategory; label: string; icon: React.ElementType }[] = [
   { id: "all", label: "Todos", icon: Globe },
   { id: "infantil", label: "Infantil", icon: Baby },
@@ -37,6 +44,48 @@ const catBadgeColors: Record<string, string> = {
   manual: "bg-muted text-muted-foreground",
 };
 
+// Parse domains from file content (supports TXT, CSV, hosts format)
+function parseDomains(content: string): string[] {
+  const lines = content.split(/\r?\n/);
+  const domains: string[] = [];
+  const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+
+    // hosts file format: "0.0.0.0 domain.com" or "127.0.0.1 domain.com"
+    const hostsMatch = line.match(/^(?:0\.0\.0\.0|127\.0\.0\.1)\s+(.+)/);
+    if (hostsMatch) {
+      const d = hostsMatch[1].trim().split(/\s/)[0];
+      if (domainRegex.test(d) && d !== 'localhost') domains.push(d.toLowerCase());
+      continue;
+    }
+
+    // CSV: could be "domain,category,notes" or just "domain"
+    const csvParts = line.split(/[,;\t]/);
+    const candidate = csvParts[0].trim().replace(/^["']|["']$/g, '');
+
+    // Plain domain
+    if (domainRegex.test(candidate)) {
+      domains.push(candidate.toLowerCase());
+      continue;
+    }
+
+    // URL format: extract domain from URL
+    try {
+      const url = new URL(candidate.startsWith('http') ? candidate : `http://${candidate}`);
+      if (domainRegex.test(url.hostname)) {
+        domains.push(url.hostname.toLowerCase());
+      }
+    } catch {
+      // Not a valid domain or URL, skip
+    }
+  }
+
+  return [...new Set(domains)]; // deduplicate
+}
+
 export function DnsBlocklist() {
   const [blocklist, setBlocklist] = useState<BlockedDomain[]>([]);
   const [adguardStats, setAdguardStats] = useState<any>(null);
@@ -47,6 +96,13 @@ export function DnsBlocklist() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updating, setUpdating] = useState(false);
 
+  // Upload state
+  const [uploadCategory, setUploadCategory] = useState<FilterCategory>("mintic");
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const fetchData = useCallback(async () => {
     try {
       const [domains, stats, updStatus] = await Promise.all([
@@ -55,15 +111,12 @@ export function DnsBlocklist() {
         api.getBlocklistUpdateStatus().catch(() => null),
       ]);
       const mapped: BlockedDomain[] = (domains as string[]).map((d: string) => ({
-        domain: d,
-        reason: "Lista local",
-        category: "manual" as FilterCategory,
-        active: true,
+        domain: d, reason: "Lista local", category: "manual" as FilterCategory, active: true,
       }));
       setBlocklist(mapped);
       setAdguardStats(stats);
       if (updStatus) setUpdateStatus(updStatus);
-    } catch { /* offline fallback */ }
+    } catch { /* offline */ }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -75,31 +128,80 @@ export function DnsBlocklist() {
       const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
       setBlocklist([{ domain: newDomain.trim().toLowerCase(), reason: reasons[newCategory] || "Manual", category: newCategory, active: true }, ...blocklist]);
       setNewDomain("");
-    } catch { /* error */ }
+    } catch {}
   };
 
   const removeDomain = async (domain: string) => {
     try {
       await api.removeFromBlocklist(domain);
       setBlocklist(blocklist.filter(b => b.domain !== domain));
-    } catch { /* error */ }
+    } catch {}
   };
 
   const triggerUpdate = async () => {
     setUpdating(true);
     try {
       await api.triggerBlocklistUpdate();
-      // Poll for completion
       setTimeout(async () => {
-        try {
-          const status = await api.getBlocklistUpdateStatus();
-          setUpdateStatus(status);
-        } catch {}
+        try { const s = await api.getBlocklistUpdateStatus(); setUpdateStatus(s); } catch {}
         setUpdating(false);
       }, 10000);
-    } catch {
-      setUpdating(false);
+    } catch { setUpdating(false); }
+  };
+
+  // File upload handler
+  const handleFileUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setUploadResult(null);
+
+    let totalAdded = 0;
+    let totalDuplicates = 0;
+    let totalInvalid = 0;
+    let totalParsed = 0;
+    const existingDomains = new Set(blocklist.map(b => b.domain));
+
+    for (const file of Array.from(files)) {
+      try {
+        const content = await file.text();
+        const domains = parseDomains(content);
+        totalParsed += domains.length;
+
+        const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
+
+        for (const domain of domains) {
+          if (existingDomains.has(domain)) {
+            totalDuplicates++;
+            continue;
+          }
+          try {
+            await api.addToBlocklist(domain);
+            existingDomains.add(domain);
+            totalAdded++;
+          } catch {
+            totalInvalid++;
+          }
+        }
+      } catch {
+        totalInvalid += 1;
+      }
     }
+
+    setUploadResult({
+      total: totalParsed,
+      added: totalAdded,
+      duplicates: totalDuplicates,
+      invalid: totalInvalid,
+      category: uploadCategory,
+    });
+    setUploading(false);
+    fetchData(); // Refresh list
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragActive(false);
+    handleFileUpload(e.dataTransfer.files);
   };
 
   const filtered = blocklist.filter((b) => {
@@ -115,7 +217,105 @@ export function DnsBlocklist() {
     <div>
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-foreground">DNS y Bloqueo de URLs</h2>
-        <p className="text-sm text-muted-foreground mt-1">AdGuard + Unbound — Listas auto-actualizadas cada 24h</p>
+        <p className="text-sm text-muted-foreground mt-1">AdGuard + Unbound — Cumplimiento ISP Colombia (MinTIC / Coljuegos)</p>
+      </div>
+
+      {/* Upload MinTIC/Coljuegos lists */}
+      <div className="card-glow rounded-lg p-5 mb-6 border-2 border-dashed border-warning/40">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-md bg-warning/20">
+            <Upload className="h-5 w-5 text-warning" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Cargar Listas MinTIC / Coljuegos</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Sube los archivos TXT o CSV que entrega el MinTIC con los dominios a bloquear para cumplir la normativa ISP
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 mb-3">
+          <select
+            value={uploadCategory}
+            onChange={(e) => setUploadCategory(e.target.value as FilterCategory)}
+            className="bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground"
+          >
+            <option value="mintic">📋 MinTIC — Resolución de bloqueo</option>
+            <option value="coljuegos">🎰 Coljuegos — Apuestas ilegales</option>
+            <option value="infantil">👶 Protección infantil</option>
+            <option value="manual">📝 Lista personalizada</option>
+          </select>
+        </div>
+
+        {/* Drop zone */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+          onDragLeave={() => setDragActive(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className={`relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
+            dragActive
+              ? "border-primary bg-primary/10"
+              : "border-border hover:border-primary/50 hover:bg-secondary/50"
+          }`}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".txt,.csv,.text,.lst,.hosts"
+            multiple
+            className="hidden"
+            onChange={(e) => handleFileUpload(e.target.files)}
+          />
+          {uploading ? (
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className="h-8 w-8 text-primary animate-spin" />
+              <p className="text-sm text-foreground font-medium">Procesando dominios...</p>
+              <p className="text-xs text-muted-foreground">Limpiando, deduplicando y aplicando a AdGuard</p>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <FileText className="h-8 w-8 text-muted-foreground" />
+              <p className="text-sm text-foreground font-medium">
+                Arrastra archivos aquí o haz clic para seleccionar
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Soporta: TXT, CSV, formato hosts (0.0.0.0 dominio.com), un dominio por línea
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Upload result */}
+        {uploadResult && (
+          <div className="mt-4 p-4 rounded-md bg-secondary/50 border border-border animate-slide-in">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle className="h-4 w-4 text-success" />
+              <span className="text-sm font-semibold text-foreground">Lista procesada</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
+              <div className="text-center">
+                <p className="text-lg font-bold font-mono text-foreground">{uploadResult.total}</p>
+                <p className="text-xs text-muted-foreground">Dominios leídos</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold font-mono text-success">{uploadResult.added}</p>
+                <p className="text-xs text-muted-foreground">Agregados</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold font-mono text-warning">{uploadResult.duplicates}</p>
+                <p className="text-xs text-muted-foreground">Duplicados</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-bold font-mono text-destructive">{uploadResult.invalid}</p>
+                <p className="text-xs text-muted-foreground">Inválidos</p>
+              </div>
+            </div>
+            <button onClick={() => setUploadResult(null)} className="mt-2 text-xs text-muted-foreground hover:text-foreground">
+              Cerrar
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Auto-update status */}
@@ -152,15 +352,6 @@ export function DnsBlocklist() {
               <><RefreshCw className="h-4 w-4" /> Actualizar ahora</>
             )}
           </Button>
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-3">
-          {[
-            { label: "Fuentes", value: `MinTIC, Coljuegos, OISD, StevenBlack, Hagezi`, small: true },
-          ].map(s => (
-            <div key={s.label} className="col-span-3 bg-secondary/30 rounded-md px-3 py-2">
-              <p className="text-xs text-muted-foreground">{s.label}: <span className="text-foreground font-mono">{s.value}</span></p>
-            </div>
-          ))}
         </div>
       </div>
 
