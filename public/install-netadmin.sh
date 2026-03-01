@@ -613,30 +613,43 @@ app.get('/api/cache/nginx', (req, res) => {
 });
 
 // === CLOUDFLARE TUNNEL ===
+const TUNNEL_URL_FILE = '/data/tunnel/tunnel-url.txt';
+
+function getTunnelUrl() {
+  // Try file first
+  try { 
+    const url = fs.readFileSync(TUNNEL_URL_FILE, 'utf8').trim();
+    if (url) return url;
+  } catch {}
+  // Try from docker logs
+  try {
+    const logs = execSync('docker logs netadmin-cloudflared 2>&1').toString();
+    const match = logs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
+    if (match && match.length > 0) {
+      const url = match[match.length - 1];
+      try { fs.writeFileSync(TUNNEL_URL_FILE, url); } catch {}
+      return url;
+    }
+  } catch {}
+  return '';
+}
+
 app.get('/api/tunnel/status', async (req, res) => {
   try {
     const containers = await docker.listContainers({ all: true });
     const cf = containers.find(c => c.Names.some(n => n === '/netadmin-cloudflared'));
     const active = cf ? cf.State === 'running' : false;
-    let url = '';
-    try { url = fs.readFileSync('/data/tunnel/tunnel-url.txt', 'utf8').trim(); } catch {}
+    const url = active ? getTunnelUrl() : '';
     res.json({ active, url });
   } catch { res.json({ active: false, url: '' }); }
 });
 
 app.post('/api/tunnel/start', async (req, res) => {
   try {
-    // Start the cloudflared container
     execSync('docker start netadmin-cloudflared 2>/dev/null || true');
-    // Wait for URL
-    await new Promise(r => setTimeout(r, 6000));
-    // Try to get URL from container logs
-    try {
-      const logs = execSync('docker logs netadmin-cloudflared 2>&1 | grep -oP "https://[a-z0-9-]+\\.trycloudflare\\.com" | tail -1').toString().trim();
-      if (logs) fs.writeFileSync('/data/tunnel/tunnel-url.txt', logs);
-    } catch {}
-    let url = '';
-    try { url = fs.readFileSync('/data/tunnel/tunnel-url.txt', 'utf8').trim(); } catch {}
+    // Wait for tunnel to establish
+    await new Promise(r => setTimeout(r, 8000));
+    const url = getTunnelUrl();
     res.json({ success: true, url });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -644,7 +657,7 @@ app.post('/api/tunnel/start', async (req, res) => {
 app.post('/api/tunnel/stop', async (req, res) => {
   try {
     execSync('docker stop netadmin-cloudflared 2>/dev/null || true');
-    try { fs.unlinkSync('/data/tunnel/tunnel-url.txt'); } catch {}
+    try { fs.unlinkSync(TUNNEL_URL_FILE); } catch {}
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -762,7 +775,7 @@ app.post('/api/dns/config', (req, res) => {
 // === QUIC / NETWORK PERFORMANCE ===
 app.get('/api/network/quic-status', (req, res) => {
   try {
-    const rules = execSync('iptables -L FORWARD -n 2>/dev/null || true').toString();
+    const rules = execSync('docker run --rm --net=host --privileged alpine sh -c "apk add --no-cache iptables >/dev/null 2>&1; iptables -L FORWARD -n 2>/dev/null || true"').toString();
     const blocked = rules.includes('udp dpt:443') && rules.includes('DROP');
     res.json({ blocked, rules_active: blocked });
   } catch { res.json({ blocked: false, rules_active: false }); }
@@ -770,22 +783,15 @@ app.get('/api/network/quic-status', (req, res) => {
 
 app.post('/api/network/quic-block', (req, res) => {
   try {
-    // Block QUIC (UDP 443) on FORWARD chain (for LAN clients) and OUTPUT (server itself)
-    execSync('iptables -C FORWARD -p udp --dport 443 -j DROP 2>/dev/null || iptables -A FORWARD -p udp --dport 443 -j DROP');
-    execSync('iptables -C FORWARD -p udp --dport 80 -j DROP 2>/dev/null || iptables -A FORWARD -p udp --dport 80 -j DROP');
-    execSync('iptables -C OUTPUT -p udp --dport 443 -j DROP 2>/dev/null || iptables -A OUTPUT -p udp --dport 443 -j DROP');
-    // Persist rules
-    execSync('iptables-save > /etc/iptables/rules.v4 2>/dev/null || true');
+    // Execute iptables on host via docker
+    execSync('docker run --rm --net=host --privileged alpine sh -c "apk add --no-cache iptables >/dev/null 2>&1; iptables -C FORWARD -p udp --dport 443 -j DROP 2>/dev/null || iptables -A FORWARD -p udp --dport 443 -j DROP; iptables -C FORWARD -p udp --dport 80 -j DROP 2>/dev/null || iptables -A FORWARD -p udp --dport 80 -j DROP; iptables -C OUTPUT -p udp --dport 443 -j DROP 2>/dev/null || iptables -A OUTPUT -p udp --dport 443 -j DROP"');
     res.json({ success: true, blocked: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/network/quic-unblock', (req, res) => {
   try {
-    execSync('iptables -D FORWARD -p udp --dport 443 -j DROP 2>/dev/null || true');
-    execSync('iptables -D FORWARD -p udp --dport 80 -j DROP 2>/dev/null || true');
-    execSync('iptables -D OUTPUT -p udp --dport 443 -j DROP 2>/dev/null || true');
-    execSync('iptables-save > /etc/iptables/rules.v4 2>/dev/null || true');
+    execSync('docker run --rm --net=host --privileged alpine sh -c "apk add --no-cache iptables >/dev/null 2>&1; iptables -D FORWARD -p udp --dport 443 -j DROP 2>/dev/null; iptables -D FORWARD -p udp --dport 80 -j DROP 2>/dev/null; iptables -D OUTPUT -p udp --dport 443 -j DROP 2>/dev/null"');
     res.json({ success: true, blocked: false });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1278,6 +1284,9 @@ services:
       context: ./api
       dockerfile: Dockerfile
     container_name: netadmin-api
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     environment:
       - API_PORT=4000
       - PANEL_PASS=${PANEL_PASS}
@@ -1285,6 +1294,9 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host-proc:ro
+      - /sbin/iptables:/sbin/iptables:ro
+      - /sbin/iptables-save:/sbin/iptables-save:ro
+      - /lib/x86_64-linux-gnu:/host-lib:ro
       - ./data/squid-cache:/data/squid-cache:ro
       - ./data/lancache/data:/data/lancache-data:ro
       - ./data/apt-cache:/data/apt-cache:ro
