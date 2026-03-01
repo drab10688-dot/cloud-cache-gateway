@@ -201,11 +201,13 @@ FROM ubuntu:22.04
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y squid-openssl openssl && \
     rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /var/cache/squid /var/log/squid /etc/squid/ssl_cert /var/spool/squid/ssl_db && \
+RUN mkdir -p /var/cache/squid /var/log/squid /etc/squid/ssl_cert /var/spool/squid && \
     chown -R proxy:proxy /var/cache/squid /var/log/squid /var/spool/squid
 COPY configs/squid.conf /etc/squid/squid.conf
 COPY certs/netadmin-ca.pem /etc/squid/ssl_cert/netadmin-ca.pem
-RUN /usr/lib/squid/security_file_certgen -c -s /var/spool/squid/ssl_db -M 64MB && \
+RUN CERTGEN=$(find /usr/lib/squid -name "security_file_certgen" -o -name "ssl_crtd" 2>/dev/null | head -1) && \
+    rm -rf /var/spool/squid/ssl_db && \
+    $CERTGEN -c -s /var/spool/squid/ssl_db -M 64MB && \
     chown -R proxy:proxy /var/spool/squid/ssl_db
 RUN squid -z 2>/dev/null || true
 EXPOSE 3128 3129 3130
