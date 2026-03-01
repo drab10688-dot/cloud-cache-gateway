@@ -1,0 +1,67 @@
+import {
+  Activity,
+  Globe,
+  ShieldCheck,
+  Database,
+  Lock,
+  Cloud,
+  LayoutDashboard,
+} from "lucide-react";
+import type { Section } from "@/pages/Index";
+
+const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
+  { id: "overview", label: "Dashboard", icon: LayoutDashboard },
+  { id: "ping", label: "Monitor Ping", icon: Activity },
+  { id: "dns", label: "DNS / Bloqueo", icon: ShieldCheck },
+  { id: "cache", label: "Caché CDN", icon: Database },
+  { id: "wireguard", label: "WireGuard", icon: Lock },
+  { id: "cloudflare", label: "Cloudflare Tunnel", icon: Cloud },
+];
+
+interface SidebarProps {
+  active: Section;
+  onNavigate: (s: Section) => void;
+}
+
+export function Sidebar({ active, onNavigate }: SidebarProps) {
+  return (
+    <aside className="fixed left-0 top-0 h-screen w-64 bg-sidebar border-r border-sidebar-border flex flex-col z-50">
+      <div className="p-5 border-b border-sidebar-border">
+        <div className="flex items-center gap-3">
+          <Globe className="h-7 w-7 text-primary" />
+          <div>
+            <h1 className="text-base font-bold text-foreground tracking-tight">NetAdmin</h1>
+            <p className="text-xs text-muted-foreground font-mono">Panel de Red v1.0</p>
+          </div>
+        </div>
+      </div>
+
+      <nav className="flex-1 p-3 space-y-1">
+        {navItems.map((item) => {
+          const isActive = active === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => onNavigate(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                isActive
+                  ? "bg-accent text-accent-foreground glow-primary"
+                  : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              }`}
+            >
+              <item.icon className="h-4 w-4" />
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="p-4 border-t border-sidebar-border">
+        <div className="flex items-center gap-2">
+          <div className="status-dot-online" />
+          <span className="text-xs text-muted-foreground font-mono">Sistema activo</span>
+        </div>
+      </div>
+    </aside>
+  );
+}
