@@ -1,9 +1,9 @@
-import { Activity, Database, Lock, Cloud, Wifi, Shield } from "lucide-react";
+import { Activity, Database, Shield, Cloud, Wifi, Globe } from "lucide-react";
 
 const services = [
-  { name: "Cloudflare Tunnel", status: "online" as const, icon: Cloud, detail: "Túnel activo — link público habilitado" },
-  { name: "WireGuard VPN", status: "online" as const, icon: Lock, detail: "3 peers conectados" },
-  { name: "Unbound DNS", status: "online" as const, icon: Shield, detail: "42 dominios bloqueados" },
+  { name: "Cloudflare Tunnel", status: "online" as const, icon: Cloud, detail: "Túnel activo — acceso sin IP pública" },
+  { name: "AdGuard Home", status: "online" as const, icon: Shield, detail: "13.4% queries bloqueadas" },
+  { name: "Unbound DNS", status: "online" as const, icon: Globe, detail: "Resolución recursiva — 4.2ms promedio" },
   { name: "Caché CDN", status: "online" as const, icon: Database, detail: "Hit rate: 87%" },
   { name: "Ping Google", status: "online" as const, icon: Activity, detail: "12ms — estable" },
   { name: "Internet", status: "online" as const, icon: Wifi, detail: "Sin caídas en 48h" },
@@ -20,7 +20,7 @@ export function StatusOverview() {
     <div>
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-foreground">Dashboard</h2>
-        <p className="text-sm text-muted-foreground mt-1">Estado general de los servicios de red</p>
+        <p className="text-sm text-muted-foreground mt-1">Estado general — Ubuntu Server</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -42,11 +42,10 @@ export function StatusOverview() {
         ))}
       </div>
 
-      {/* Quick Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
         {[
           { label: "Latencia promedio", value: "12ms", color: "text-primary" },
-          { label: "URLs bloqueadas", value: "42", color: "text-warning" },
+          { label: "DNS bloqueadas", value: "3,812", color: "text-warning" },
           { label: "Cache hit rate", value: "87%", color: "text-success" },
           { label: "Uptime", value: "99.8%", color: "text-primary" },
         ].map((stat) => (

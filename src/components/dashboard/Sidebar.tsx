@@ -3,7 +3,7 @@ import {
   Globe,
   ShieldCheck,
   Database,
-  Lock,
+  Shield,
   Cloud,
   LayoutDashboard,
 } from "lucide-react";
@@ -14,7 +14,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "ping", label: "Monitor Ping", icon: Activity },
   { id: "dns", label: "DNS / Bloqueo", icon: ShieldCheck },
   { id: "cache", label: "Caché CDN", icon: Database },
-  { id: "wireguard", label: "WireGuard", icon: Lock },
+  { id: "adguard", label: "AdGuard + Unbound", icon: Shield },
   { id: "cloudflare", label: "Cloudflare Tunnel", icon: Cloud },
 ];
 
@@ -31,7 +31,7 @@ export function Sidebar({ active, onNavigate }: SidebarProps) {
           <Globe className="h-7 w-7 text-primary" />
           <div>
             <h1 className="text-base font-bold text-foreground tracking-tight">NetAdmin</h1>
-            <p className="text-xs text-muted-foreground font-mono">Panel de Red v1.0</p>
+            <p className="text-xs text-muted-foreground font-mono">Ubuntu Server v1.0</p>
           </div>
         </div>
       </div>
