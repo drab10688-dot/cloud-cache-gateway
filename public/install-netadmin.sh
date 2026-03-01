@@ -214,8 +214,8 @@ read -p "  Caché Nginx CDN (general) en GB [50]: " NGINX_CACHE_GB
 NGINX_CACHE_GB=${NGINX_CACHE_GB:-50}
 read -p "  Caché RAM Squid en MB [512]: " SQUID_CACHE_MEM
 SQUID_CACHE_MEM=${SQUID_CACHE_MEM:-512}
-read -p "  Caché RAM Lancache en GB [2]: " LANCACHE_CACHE_MEM
-LANCACHE_CACHE_MEM=${LANCACHE_CACHE_MEM:-2}
+read -p "  Caché RAM Lancache en MB [512]: " LANCACHE_CACHE_MEM
+LANCACHE_CACHE_MEM=${LANCACHE_CACHE_MEM:-512}
 
 TOTAL_CACHE=$((SQUID_CACHE_GB + LANCACHE_CACHE_GB + NGINX_CACHE_GB + 5))
 echo ""
@@ -859,7 +859,7 @@ DOCKERFILE
 log "Generando monitor de ping..."
 
 cat > ${NETADMIN_DIR}/configs/ping-monitor.sh << 'PING_SCRIPT'
-#!/bin/bash
+#!/bin/sh
 LOG_DIR="/data"
 WAS_DOWN=false
 while true; do
@@ -869,15 +869,23 @@ while true; do
   if [ $? -eq 0 ]; then
     LAT=$(echo "$RESULT" | grep 'time=' | sed 's/.*time=\([0-9.]*\).*/\1/')
     echo "$TS|OK|${LAT}" >> "$LOG_FILE"
-    [ "$WAS_DOWN" = true ] && echo "$TS|RECOVERED" >> "$LOG_DIR/downtime.log" && WAS_DOWN=false
+    if [ "$WAS_DOWN" = "true" ]; then
+      echo "$TS|RECOVERED" >> "$LOG_DIR/downtime.log"
+      WAS_DOWN=false
+    fi
   else
     echo "$TS|FAIL|0" >> "$LOG_FILE"
-    [ "$WAS_DOWN" = false ] && echo "$TS|DOWN" >> "$LOG_DIR/downtime.log" && WAS_DOWN=true
+    if [ "$WAS_DOWN" = "false" ]; then
+      echo "$TS|DOWN" >> "$LOG_DIR/downtime.log"
+      WAS_DOWN=true
+    fi
   fi
   sleep 5
 done
 PING_SCRIPT
 chmod +x ${NETADMIN_DIR}/configs/ping-monitor.sh
+# Fix line endings (remove Windows CRLF)
+sed -i 's/\r$//' ${NETADMIN_DIR}/configs/ping-monitor.sh
 
 # ============================================================
 # 8. NGINX CONFIG
@@ -1184,9 +1192,10 @@ services:
     image: lancachenet/monolithic:latest
     container_name: netadmin-lancache
     environment:
-      - CACHE_MEM_SIZE=${LANCACHE_CACHE_MEM}g
+      - CACHE_MEM_SIZE=${LANCACHE_CACHE_MEM}m
       - CACHE_DISK_SIZE=${LANCACHE_CACHE_GB}g
       - CACHE_MAX_AGE=30d
+      - NGINX_WORKER_PROCESSES=auto
     volumes:
       - ./data/lancache/data:/data/cache
       - ./data/lancache/logs:/data/logs
@@ -1212,12 +1221,12 @@ services:
 
   # ── Monitor de Ping ──
   ping:
-    image: bash:latest
+    image: alpine:latest
     container_name: netadmin-ping
     volumes:
       - ./configs/ping-monitor.sh:/ping-monitor.sh:ro
       - ./data/ping-logs:/data
-    command: ["/ping-monitor.sh"]
+    command: ["/bin/sh", "/ping-monitor.sh"]
     networks:
       netadmin:
         ipv4_address: 172.20.0.17
