@@ -197,7 +197,7 @@ SQUID_CONF
 # 5. DOCKERFILE SQUID (necesita ssl-bump)
 # ============================================================
 cat > ${NETADMIN_DIR}/Dockerfile.squid << 'DOCKERFILE'
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y squid-openssl openssl && \
     rm -rf /var/lib/apt/lists/*
