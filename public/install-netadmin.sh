@@ -758,6 +758,86 @@ app.post('/api/dns/config', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// === QUIC / NETWORK PERFORMANCE ===
+app.get('/api/network/quic-status', (req, res) => {
+  try {
+    const rules = execSync('iptables -L FORWARD -n 2>/dev/null || true').toString();
+    const blocked = rules.includes('udp dpt:443') && rules.includes('DROP');
+    res.json({ blocked, rules_active: blocked });
+  } catch { res.json({ blocked: false, rules_active: false }); }
+});
+
+app.post('/api/network/quic-block', (req, res) => {
+  try {
+    // Block QUIC (UDP 443) on FORWARD chain (for LAN clients) and OUTPUT (server itself)
+    execSync('iptables -C FORWARD -p udp --dport 443 -j DROP 2>/dev/null || iptables -A FORWARD -p udp --dport 443 -j DROP');
+    execSync('iptables -C FORWARD -p udp --dport 80 -j DROP 2>/dev/null || iptables -A FORWARD -p udp --dport 80 -j DROP');
+    execSync('iptables -C OUTPUT -p udp --dport 443 -j DROP 2>/dev/null || iptables -A OUTPUT -p udp --dport 443 -j DROP');
+    // Persist rules
+    execSync('iptables-save > /etc/iptables/rules.v4 2>/dev/null || true');
+    res.json({ success: true, blocked: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/network/quic-unblock', (req, res) => {
+  try {
+    execSync('iptables -D FORWARD -p udp --dport 443 -j DROP 2>/dev/null || true');
+    execSync('iptables -D FORWARD -p udp --dport 80 -j DROP 2>/dev/null || true');
+    execSync('iptables -D OUTPUT -p udp --dport 443 -j DROP 2>/dev/null || true');
+    execSync('iptables-save > /etc/iptables/rules.v4 2>/dev/null || true');
+    res.json({ success: true, blocked: false });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/network/video-stats', (req, res) => {
+  try {
+    const lines = fs.readFileSync('/data/squid-logs/access.log', 'utf8').trim().split('\n').slice(-5000);
+    const videoDomains = ['googlevideo', 'youtube', 'ytimg', 'nflxvideo', 'fbcdn', 'tiktokcdn', 'akamaihd'];
+    let total = 0, cached = 0, totalBytes = 0, cachedBytes = 0;
+    const domainStats = {};
+    
+    lines.forEach(line => {
+      const isVideo = videoDomains.some(d => line.includes(d));
+      if (!isVideo) return;
+      total++;
+      const isHit = line.includes('HIT');
+      if (isHit) cached++;
+      // Try to extract bytes
+      const parts = line.split(/\s+/);
+      const bytes = parseInt(parts[4]) || 0;
+      totalBytes += bytes;
+      if (isHit) cachedBytes += bytes;
+      // Track per domain
+      const matchedDomain = videoDomains.find(d => line.includes(d));
+      if (matchedDomain) {
+        if (!domainStats[matchedDomain]) domainStats[matchedDomain] = { hits: 0, cached: 0 };
+        domainStats[matchedDomain].hits++;
+        if (isHit) domainStats[matchedDomain].cached++;
+      }
+    });
+    
+    const formatBytes = (b) => {
+      if (b > 1073741824) return (b / 1073741824).toFixed(1) + ' GB';
+      if (b > 1048576) return (b / 1048576).toFixed(1) + ' MB';
+      return (b / 1024).toFixed(1) + ' KB';
+    };
+    
+    const top_domains = Object.entries(domainStats)
+      .map(([domain, stats]) => ({ domain: `*.${domain}.*`, hits: stats.hits, cached: stats.cached }))
+      .sort((a, b) => b.hits - a.hits);
+    
+    res.json({
+      total_requests: total,
+      cached_requests: cached,
+      hit_rate: total > 0 ? Math.round(cached / total * 100) : 0,
+      bandwidth_saved: formatBytes(cachedBytes),
+      top_domains,
+    });
+  } catch {
+    res.json({ total_requests: 0, cached_requests: 0, hit_rate: 0, bandwidth_saved: '0 KB', top_domains: [] });
+  }
+});
+
 app.listen(API_PORT, '0.0.0.0', () => {
   console.log(`NetAdmin API v4.0 → http://0.0.0.0:${API_PORT}`);
 });

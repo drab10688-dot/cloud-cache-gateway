@@ -104,4 +104,10 @@ export const api = {
   getDnsConfig: () => apiFetch('/dns/config'),
   setDnsConfig: (primary: string, secondary: string) =>
     apiFetch('/dns/config', { method: 'POST', body: JSON.stringify({ primary, secondary }) }),
+
+  // QUIC / Network Performance
+  getQuicStatus: () => apiFetch('/network/quic-status'),
+  blockQuic: () => apiFetch('/network/quic-block', { method: 'POST' }),
+  unblockQuic: () => apiFetch('/network/quic-unblock', { method: 'POST' }),
+  getVideoStats: () => apiFetch('/network/video-stats'),
 };
