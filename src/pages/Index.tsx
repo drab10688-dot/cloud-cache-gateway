@@ -6,8 +6,9 @@ import { DnsBlocklist } from "@/components/dashboard/DnsBlocklist";
 import { CacheStats } from "@/components/dashboard/CacheStats";
 import { AdGuardPanel } from "@/components/dashboard/AdGuardPanel";
 import { CloudflarePanel } from "@/components/dashboard/CloudflarePanel";
+import { InstallerPanel } from "@/components/dashboard/InstallerPanel";
 
-export type Section = "overview" | "ping" | "dns" | "cache" | "adguard" | "cloudflare";
+export type Section = "overview" | "ping" | "dns" | "cache" | "adguard" | "cloudflare" | "installer";
 
 const Index = () => {
   const [activeSection, setActiveSection] = useState<Section>("overview");
@@ -20,6 +21,7 @@ const Index = () => {
       case "cache": return <CacheStats />;
       case "adguard": return <AdGuardPanel />;
       case "cloudflare": return <CloudflarePanel />;
+      case "installer": return <InstallerPanel onNavigate={setActiveSection} />;
     }
   };
 
