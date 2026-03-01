@@ -33,13 +33,13 @@ export function LoginScreen({ onLogin }: LoginProps) {
   };
 
   return (
-    <div className="min-h-screen bg-background grid-pattern flex items-center justify-center">
-      <div className="card-glow rounded-lg p-8 w-full max-w-sm mx-4">
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="card-glow rounded-xl p-8 w-full max-w-sm mx-4 shadow-lg">
         <div className="flex items-center gap-3 mb-6 justify-center">
           <Globe className="h-8 w-8 text-primary" />
           <div>
             <h1 className="text-xl font-bold text-foreground">NetAdmin</h1>
-            <p className="text-xs text-muted-foreground font-mono">Panel de Red v2.0</p>
+            <p className="text-xs text-muted-foreground font-mono">Panel de Red v3.0</p>
           </div>
         </div>
 

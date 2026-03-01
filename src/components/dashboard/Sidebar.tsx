@@ -32,10 +32,10 @@ export function Sidebar({ active, onNavigate }: SidebarProps) {
     <aside className="fixed left-0 top-0 h-screen w-64 bg-sidebar border-r border-sidebar-border flex flex-col z-50">
       <div className="p-5 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
-          <Globe className="h-7 w-7 text-primary" />
+          <Globe className="h-7 w-7 text-sidebar-primary" />
           <div>
-            <h1 className="text-base font-bold text-foreground tracking-tight">NetAdmin</h1>
-            <p className="text-xs text-muted-foreground font-mono">Ubuntu Server v3.0</p>
+            <h1 className="text-base font-bold text-white tracking-tight">NetAdmin</h1>
+            <p className="text-xs text-sidebar-foreground font-mono">Ubuntu Server v3.0</p>
           </div>
         </div>
       </div>
@@ -49,7 +49,7 @@ export function Sidebar({ active, onNavigate }: SidebarProps) {
               onClick={() => onNavigate(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
                 isActive
-                  ? "bg-accent text-accent-foreground glow-primary"
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
                   : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               }`}
             >
@@ -63,7 +63,7 @@ export function Sidebar({ active, onNavigate }: SidebarProps) {
       <div className="p-4 border-t border-sidebar-border">
         <div className="flex items-center gap-2">
           <div className="status-dot-online" />
-          <span className="text-xs text-muted-foreground font-mono">Sistema activo</span>
+          <span className="text-xs text-sidebar-foreground font-mono">Sistema activo</span>
         </div>
       </div>
     </aside>
