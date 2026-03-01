@@ -266,7 +266,7 @@ success "Docker $(docker --version | awk '{print $3}') + Compose $(docker compos
 # ============================================================
 log "Creando estructura de directorios..."
 mkdir -p ${NETADMIN_DIR}/{configs,api,web,logs,certs}
-mkdir -p ${NETADMIN_DIR}/data/{unbound,adguard/{work,conf},squid-cache,lancache/{data,logs},apt-cache,kuma,nginx-cache,ping-logs}
+mkdir -p ${NETADMIN_DIR}/data/{unbound,adguard/{work,conf},squid-cache,squid-logs,lancache/{data,logs},apt-cache,kuma,nginx-cache,ping-logs,cron-logs}
 
 # ============================================================
 # 3. CONFIGURACIÓN UNBOUND
@@ -1062,14 +1062,13 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host-proc:ro
-      - ./data:/data:ro
       - ./data/squid-cache:/data/squid-cache:ro
       - ./data/lancache/data:/data/lancache-data:ro
       - ./data/apt-cache:/data/apt-cache:ro
       - ./data/nginx-cache:/data/nginx-cache:ro
-      - ./data/ping-logs:/data/ping-logs:ro
-      - ./data/squid-logs:/data/squid-logs:ro
+      - ./data/ping-logs:/data/ping-logs
       - ./data/adguard/conf:/data/adguard/conf
+      - ./logs:/data/cron-logs:ro
       - ${NETADMIN_DIR}:/host-data:ro
     depends_on:
       - adguard
