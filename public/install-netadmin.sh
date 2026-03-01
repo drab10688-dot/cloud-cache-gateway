@@ -1,19 +1,19 @@
 #!/bin/bash
 # ============================================================
-# NetAdmin v3.0 — Script de Instalación Completo
-# Ubuntu Server VPS — Todo funcional con API y Panel Web
+# NetAdmin v4.0 — Instalación 100% Docker
+# Ubuntu Server VPS — Un solo docker-compose.yml
 # ============================================================
-# Instala y conecta:
+# Servicios (todos en contenedores):
 #   - Unbound DNS (recursivo, DNSSEC, caché agresivo)
 #   - AdGuard Home (filtrado DNS, bloqueo infantil, MinTIC)
 #   - Squid (proxy caché SSL Bump para YouTube/HTTPS)
 #   - apt-cacher-ng (caché repos Linux)
-#   - Lancache (Docker: Windows Update, Steam, Epic)
+#   - Lancache (Windows Update, Steam, Epic)
 #   - Uptime Kuma (monitoreo de servicios)
 #   - Cloudflare Tunnel (acceso sin IP pública)
 #   - Monitor de Ping (detección de caídas)
 #   - API Backend (Node.js — conecta panel con servicios)
-#   - Panel Web NetAdmin (frontend React servido por Nginx)
+#   - Nginx (panel web + reverse proxy)
 # ============================================================
 
 set -e
@@ -29,10 +29,11 @@ grep -qi "ubuntu" /etc/os-release || error "Solo para Ubuntu Server"
 
 IP_ADDR=$(hostname -I | awk '{print $1}')
 UBUNTU_VERSION=$(lsb_release -rs)
+NETADMIN_DIR="/opt/netadmin"
 
 echo ""
 echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}   NetAdmin v3.0 — Instalación Completa${NC}"
+echo -e "${CYAN}   NetAdmin v4.0 — Instalación 100% Docker${NC}"
 echo -e "${CYAN}   Ubuntu $UBUNTU_VERSION — $IP_ADDR${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
 echo ""
@@ -42,11 +43,12 @@ DISK_AVAIL=$(df -BG / | awk 'NR==2 {print $4}' | tr -d 'G')
 echo -e "  ${CYAN}Disco disponible: ${GREEN}${DISK_AVAIL} GB${NC}"
 echo ""
 
-read -p "Token de Cloudflare Tunnel (Enter para omitir): " CF_TUNNEL_TOKEN
+# ── Configuración interactiva ──
 read -p "Contraseña para el panel web [admin123]: " PANEL_PASS
 PANEL_PASS=${PANEL_PASS:-admin123}
 read -p "Puerto del panel web [80]: " PANEL_PORT
 PANEL_PORT=${PANEL_PORT:-80}
+read -p "Token de Cloudflare Tunnel (Enter para omitir): " CF_TUNNEL_TOKEN
 
 echo ""
 echo -e "${CYAN}  ── Configuración de caché (disco) ──${NC}"
@@ -71,49 +73,51 @@ if [ "$TOTAL_CACHE" -gt "$DISK_AVAIL" ]; then
   [ "${CONT,,}" != "s" ] && error "Instalación cancelada. Ajusta los tamaños de caché."
 fi
 
-ADGUARD_PORT=3000
-API_PORT=4000
-KUMA_PORT=3001
-
 echo ""
-log "Iniciando instalación de todos los servicios..."
-echo -e "  Caché total planificada: ${CYAN}${TOTAL_CACHE} GB${NC}"
+log "Iniciando instalación Docker..."
 echo ""
 
 # ============================================================
-# 1. DEPENDENCIAS BASE
+# 1. INSTALAR DOCKER + DOCKER COMPOSE
 # ============================================================
-log "Instalando dependencias..."
+log "Instalando Docker..."
 apt-get update -qq
-apt-get upgrade -y -qq
-apt-get install -y -qq curl wget gnupg lsb-release apt-transport-https \
-  ca-certificates software-properties-common ufw jq openssl \
-  docker.io docker-compose nginx
+apt-get install -y -qq curl wget jq openssl ca-certificates gnupg lsb-release
 
-# Node.js 20 LTS
-if ! command -v node &>/dev/null; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-  apt-get install -y -qq nodejs
+if ! command -v docker &>/dev/null; then
+  curl -fsSL https://get.docker.com | sh
 fi
-
 systemctl enable docker && systemctl start docker
-success "Dependencias instaladas (Node.js $(node -v), Docker)"
+
+# Instalar docker-compose plugin si no existe
+if ! docker compose version &>/dev/null; then
+  COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | jq -r .tag_name)
+  ARCH=$(uname -m)
+  mkdir -p /usr/local/lib/docker/cli-plugins
+  curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${ARCH}" -o /usr/local/lib/docker/cli-plugins/docker-compose
+  chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+fi
+success "Docker $(docker --version | awk '{print $3}') + Compose $(docker compose version --short)"
 
 # ============================================================
-# 2. UNBOUND DNS
+# 2. CREAR ESTRUCTURA DE DIRECTORIOS
 # ============================================================
-log "Instalando Unbound DNS recursivo..."
-apt-get install -y -qq unbound dns-root-data
-wget -q -O /var/lib/unbound/root.hints https://www.internic.net/domain/named.root
+log "Creando estructura de directorios..."
+mkdir -p ${NETADMIN_DIR}/{configs,api,web,logs,certs}
+mkdir -p ${NETADMIN_DIR}/data/{unbound,adguard/{work,conf},squid-cache,lancache/{data,logs},apt-cache,kuma,nginx-cache,ping-logs}
 
-cat > /etc/unbound/unbound.conf.d/netadmin.conf << 'EOF'
+# ============================================================
+# 3. CONFIGURACIÓN UNBOUND
+# ============================================================
+log "Generando configuración Unbound..."
+wget -q -O ${NETADMIN_DIR}/configs/root.hints https://www.internic.net/domain/named.root 2>/dev/null || true
+
+cat > ${NETADMIN_DIR}/configs/unbound.conf << 'EOF'
 server:
-    interface: 127.0.0.1
-    port: 5353
+    interface: 0.0.0.0
+    port: 53
     do-ip6: no
-    access-control: 127.0.0.0/8 allow
-    access-control: 10.0.0.0/8 allow
-    access-control: 192.168.0.0/16 allow
+    access-control: 0.0.0.0/0 allow
     num-threads: 4
     msg-cache-slabs: 8
     rrset-cache-slabs: 8
@@ -134,67 +138,42 @@ server:
     harden-dnssec-stripped: yes
     qname-minimisation: yes
     auto-trust-anchor-file: "/var/lib/unbound/root.key"
-    root-hints: /var/lib/unbound/root.hints
+    root-hints: /etc/unbound/root.hints
     verbosity: 1
-    logfile: /var/log/unbound/unbound.log
+    logfile: ""
+    log-queries: no
 EOF
 
-mkdir -p /var/log/unbound && chown unbound:unbound /var/log/unbound
-if systemctl is-active --quiet systemd-resolved; then
-  systemctl stop systemd-resolved && systemctl disable systemd-resolved
-  rm -f /etc/resolv.conf && echo "nameserver 127.0.0.1" > /etc/resolv.conf
-fi
-systemctl restart unbound && systemctl enable unbound
-success "Unbound DNS → 127.0.0.1:5353"
-
 # ============================================================
-# 3. ADGUARD HOME
+# 4. CONFIGURACIÓN SQUID SSL BUMP
 # ============================================================
-log "Instalando AdGuard Home..."
-curl -s -S -L https://raw.githubusercontent.com/AdguardTeam/AdGuardHome/master/scripts/install.sh | sh -s -- -v
-sleep 3
+log "Generando certificado CA y configuración Squid..."
 
-mkdir -p /opt/AdGuardHome/blocklists
-cat > /opt/AdGuardHome/blocklists/colombia_mintic.txt << 'BLOCKLIST'
-# NetAdmin — Lista Colombia (MinTIC + Coljuegos + Infantil)
-# Agrega dominios según resoluciones vigentes
-BLOCKLIST
-
-ADGUARD_CONFIG="/opt/AdGuardHome/AdGuardHome.yaml"
-[ -f "$ADGUARD_CONFIG" ] && sed -i "s/address: 0.0.0.0:3000/address: 0.0.0.0:${ADGUARD_PORT}/" "$ADGUARD_CONFIG"
-systemctl restart AdGuardHome 2>/dev/null || true
-success "AdGuard Home → puerto $ADGUARD_PORT"
-
-# ============================================================
-# 4. SQUID SSL BUMP
-# ============================================================
-log "Instalando Squid con SSL Bump..."
-apt-get install -y -qq squid-openssl
-mkdir -p /etc/squid/ssl_cert && cd /etc/squid/ssl_cert
 openssl req -new -newkey rsa:2048 -sha256 -days 3650 -nodes -x509 \
-  -keyout netadmin-ca.pem -out netadmin-ca.pem \
+  -keyout ${NETADMIN_DIR}/certs/netadmin-ca.pem \
+  -out ${NETADMIN_DIR}/certs/netadmin-ca.pem \
   -subj "/C=CO/ST=Colombia/O=NetAdmin/CN=NetAdmin CA" 2>/dev/null
-/usr/lib/squid/security_file_certgen -c -s /var/spool/squid/ssl_db -M 64MB 2>/dev/null || true
-chown -R proxy:proxy /var/spool/squid/ssl_db 2>/dev/null || true
-mkdir -p /var/cache/squid && chown proxy:proxy /var/cache/squid
 
 SQUID_CACHE_MB=$((SQUID_CACHE_GB * 1000))
-cat > /etc/squid/squid.conf << SQUID_CONF
+cat > ${NETADMIN_DIR}/configs/squid.conf << SQUID_CONF
 http_port 3128
 http_port 3129 intercept
 https_port 3130 intercept ssl-bump cert=/etc/squid/ssl_cert/netadmin-ca.pem generate-host-certificates=on dynamic_cert_mem_cache_size=16MB
+
 acl step1 at_step SslBump1
-acl youtube_ssl ssl::server_name .youtube.com .googlevideo.com .ytimg.com
-acl windows_ssl ssl::server_name .windowsupdate.com .microsoft.com .download.microsoft.com
-acl cacheable_ssl ssl::server_name .youtube.com .googlevideo.com .ytimg.com .windowsupdate.com .microsoft.com
+acl cacheable_ssl ssl::server_name .youtube.com .googlevideo.com .ytimg.com .windowsupdate.com .microsoft.com .download.microsoft.com
+
 ssl_bump peek step1
 ssl_bump bump cacheable_ssl
 ssl_bump splice all
+
 sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/spool/squid/ssl_db -M 64MB
+
 cache_dir ufs /var/cache/squid ${SQUID_CACHE_MB} 16 256
 maximum_object_size 4 GB
 cache_mem ${SQUID_CACHE_MEM} MB
 maximum_object_size_in_memory 128 MB
+
 refresh_pattern -i \.googlevideo\.com\/videoplayback 43200 90% 86400 override-expire override-lastmod reload-into-ims ignore-reload ignore-no-store ignore-private
 refresh_pattern -i ytimg\.com 43200 90% 86400 override-expire
 refresh_pattern -i windowsupdate\.com/.*\.(cab|exe|ms[i|u|f|p]|[ap]sf|wm[v|a]|dat|zip|msu) 43200 80% 129600 reload-into-ims
@@ -202,216 +181,72 @@ refresh_pattern -i download\.microsoft\.com 43200 80% 129600
 refresh_pattern ^ftp: 1440 20% 10080
 refresh_pattern -i (/cgi-bin/|\?) 0 0% 0
 refresh_pattern . 0 20% 4320
-acl localnet src 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+
+acl localnet src 0.0.0.0/0
 acl Safe_ports port 80 443 21 70 210 280 488 591 777 1025-65535
 http_access allow localnet
 http_access allow localhost
 http_access deny all
+
 access_log /var/log/squid/access.log squid
 cache_log /var/log/squid/cache.log
-cache_store_log /var/log/squid/store.log
 visible_hostname netadmin-proxy
 SQUID_CONF
 
-squid -z 2>/dev/null || true
-systemctl restart squid && systemctl enable squid
-success "Squid → puerto 3128 (SSL Bump: YouTube + Windows)"
+# ============================================================
+# 5. DOCKERFILE SQUID (necesita ssl-bump)
+# ============================================================
+cat > ${NETADMIN_DIR}/Dockerfile.squid << 'DOCKERFILE'
+FROM ubuntu:22.04
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y squid-openssl openssl && \
+    rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /var/cache/squid /var/log/squid /etc/squid/ssl_cert /var/spool/squid/ssl_db && \
+    chown -R proxy:proxy /var/cache/squid /var/log/squid /var/spool/squid
+COPY configs/squid.conf /etc/squid/squid.conf
+COPY certs/netadmin-ca.pem /etc/squid/ssl_cert/netadmin-ca.pem
+RUN /usr/lib/squid/security_file_certgen -c -s /var/spool/squid/ssl_db -M 64MB && \
+    chown -R proxy:proxy /var/spool/squid/ssl_db
+RUN squid -z 2>/dev/null || true
+EXPOSE 3128 3129 3130
+CMD ["squid", "-N", "-d1"]
+DOCKERFILE
 
 # ============================================================
-# 5. APT-CACHER-NG
+# 6. API BACKEND (Node.js)
 # ============================================================
-log "Instalando apt-cacher-ng..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apt-cacher-ng
-systemctl restart apt-cacher-ng && systemctl enable apt-cacher-ng
-echo 'Acquire::http::Proxy "http://127.0.0.1:3142";' > /etc/apt/apt.conf.d/01proxy
-success "apt-cacher-ng → puerto 3142"
+log "Generando API Backend..."
 
-# ============================================================
-# 6. LANCACHE (Docker)
-# ============================================================
-log "Instalando Lancache..."
-mkdir -p /opt/lancache /var/cache/lancache/{data,logs}
-cat > /opt/lancache/docker-compose.yml << LANCACHE_YML
-version: '3'
-services:
-  lancache-dns:
-    image: lancachenet/lancache-dns:latest
-    container_name: lancache-dns
-    environment:
-      - USE_GENERIC_CACHE=true
-      - LANCACHE_IP=$IP_ADDR
-      - UPSTREAM_DNS=127.0.0.1
-    ports:
-      - "5354:53/udp"
-      - "5354:53/tcp"
-    restart: unless-stopped
-  lancache:
-    image: lancachenet/monolithic:latest
-    container_name: lancache
-    environment:
-      - CACHE_MEM_SIZE=${LANCACHE_CACHE_MEM}g
-      - CACHE_DISK_SIZE=${LANCACHE_CACHE_GB}g
-      - CACHE_MAX_AGE=30d
-    volumes:
-      - /var/cache/lancache/data:/data/cache
-      - /var/cache/lancache/logs:/data/logs
-    ports:
-      - "8880:80"
-    restart: unless-stopped
-LANCACHE_YML
-cd /opt/lancache && docker-compose up -d
-success "Lancache → puerto 8880 (Windows Update, Steam, Epic)"
-
-# ============================================================
-# 6b. UPTIME KUMA (Docker)
-# ============================================================
-log "Instalando Uptime Kuma..."
-mkdir -p /opt/uptime-kuma
-
-cat > /opt/uptime-kuma/docker-compose.yml << KUMA_YML
-version: '3'
-services:
-  uptime-kuma:
-    image: louislam/uptime-kuma:1
-    container_name: uptime-kuma
-    volumes:
-      - /opt/uptime-kuma/data:/app/data
-    ports:
-      - "${KUMA_PORT}:3001"
-    restart: unless-stopped
-KUMA_YML
-
-cd /opt/uptime-kuma && docker-compose up -d
-success "Uptime Kuma → puerto $KUMA_PORT"
-
-# ============================================================
-# 7. CLOUDFLARE TUNNEL
-# ============================================================
-log "Instalando cloudflared..."
-ARCH=$(dpkg --print-architecture)
-curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARCH}.deb" -o /tmp/cloudflared.deb
-dpkg -i /tmp/cloudflared.deb && rm -f /tmp/cloudflared.deb
-
-cat > /usr/local/bin/netadmin-tunnel << TUNNEL_SCRIPT
-#!/bin/bash
-TUNNEL_LOG="/var/log/netadmin/tunnel.log"
-TUNNEL_PID="/tmp/cloudflared.pid"
-mkdir -p /var/log/netadmin
-
-case "\$1" in
-  start)
-    if [ -n "\$2" ]; then
-      cloudflared service install "\$2"
-      systemctl start cloudflared
-      echo "Túnel iniciado con token"
-    else
-      nohup cloudflared tunnel --url http://localhost:${PANEL_PORT} > "\$TUNNEL_LOG" 2>&1 &
-      echo \$! > "\$TUNNEL_PID"
-      sleep 5
-      URL=\$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' "\$TUNNEL_LOG" | head -1)
-      echo "\$URL" > /var/log/netadmin/tunnel-url.txt
-      echo "Túnel activo: \$URL"
-    fi
-    ;;
-  stop)
-    [ -f "\$TUNNEL_PID" ] && kill \$(cat "\$TUNNEL_PID") 2>/dev/null && rm "\$TUNNEL_PID"
-    systemctl stop cloudflared 2>/dev/null
-    rm -f /var/log/netadmin/tunnel-url.txt
-    echo "Túnel detenido"
-    ;;
-  status)
-    if [ -f "\$TUNNEL_PID" ] && kill -0 \$(cat "\$TUNNEL_PID") 2>/dev/null; then echo "ACTIVE"
-    elif systemctl is-active --quiet cloudflared 2>/dev/null; then echo "ACTIVE"
-    else echo "INACTIVE"; fi
-    ;;
-  url)
-    cat /var/log/netadmin/tunnel-url.txt 2>/dev/null || echo ""
-    ;;
-  *) echo "Uso: netadmin-tunnel {start [token]|stop|status|url}" ;;
-esac
-TUNNEL_SCRIPT
-chmod +x /usr/local/bin/netadmin-tunnel
-
-[ -n "$CF_TUNNEL_TOKEN" ] && cloudflared service install "$CF_TUNNEL_TOKEN"
-success "cloudflared instalado"
-
-# ============================================================
-# 8. MONITOR DE PING
-# ============================================================
-log "Configurando monitor de ping..."
-mkdir -p /var/log/netadmin
-
-cat > /opt/netadmin-ping-monitor.sh << 'PING_SCRIPT'
-#!/bin/bash
-LOG_DIR="/var/log/netadmin"
-mkdir -p "$LOG_DIR"
-WAS_DOWN=false
-while true; do
-  TS=$(date '+%Y-%m-%d %H:%M:%S')
-  LOG_FILE="$LOG_DIR/ping-$(date +%Y-%m-%d).log"
-  RESULT=$(ping -c 1 -W 3 8.8.8.8 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    LAT=$(echo "$RESULT" | grep 'time=' | sed 's/.*time=\([0-9.]*\).*/\1/')
-    echo "$TS|OK|${LAT}" >> "$LOG_FILE"
-    [ "$WAS_DOWN" = true ] && echo "$TS|RECOVERED" >> "$LOG_DIR/downtime.log" && WAS_DOWN=false
-  else
-    echo "$TS|FAIL|0" >> "$LOG_FILE"
-    [ "$WAS_DOWN" = false ] && echo "$TS|DOWN" >> "$LOG_DIR/downtime.log" && WAS_DOWN=true
-  fi
-  sleep 5
-done
-PING_SCRIPT
-chmod +x /opt/netadmin-ping-monitor.sh
-
-cat > /etc/systemd/system/netadmin-ping.service << 'EOF'
-[Unit]
-Description=NetAdmin Ping Monitor
-After=network.target
-[Service]
-Type=simple
-ExecStart=/opt/netadmin-ping-monitor.sh
-Restart=always
-RestartSec=10
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload && systemctl enable netadmin-ping && systemctl start netadmin-ping
-success "Monitor de ping activo"
-
-# ============================================================
-# 9. API BACKEND (Node.js Express)
-# ============================================================
-log "Instalando API Backend..."
-mkdir -p /opt/netadmin-api
-
-cat > /opt/netadmin-api/package.json << 'PKG_JSON'
+cat > ${NETADMIN_DIR}/api/package.json << 'PKG'
 {
   "name": "netadmin-api",
-  "version": "2.0.0",
+  "version": "4.0.0",
   "type": "module",
   "dependencies": {
     "express": "^4.18.2",
-    "cors": "^2.8.5"
+    "cors": "^2.8.5",
+    "dockerode": "^4.0.0"
   }
 }
-PKG_JSON
+PKG
 
-cat > /opt/netadmin-api/server.js << 'API_SERVER'
+cat > ${NETADMIN_DIR}/api/server.js << 'API_JS'
 import express from 'express';
 import cors from 'cors';
-import { execSync, exec } from 'child_process';
+import { execSync } from 'child_process';
 import fs from 'fs';
-import http from 'http';
+import Docker from 'dockerode';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const API_PORT = process.env.API_PORT || 4000;
-const ADGUARD_URL = 'http://127.0.0.1:3000';
 const PANEL_PASS = process.env.PANEL_PASS || 'admin123';
+const ADGUARD_URL = process.env.ADGUARD_URL || 'http://adguard:3000';
+const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
-// Simple auth middleware
+// Auth middleware
 app.use((req, res, next) => {
   if (req.path === '/api/auth/login') return next();
   const token = req.headers.authorization?.replace('Bearer ', '');
@@ -429,42 +264,67 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
-// === SERVICIOS STATUS ===
-app.get('/api/services', (req, res) => {
-  const checkService = (name) => {
-    try {
-      const result = execSync(`systemctl is-active ${name} 2>/dev/null`).toString().trim();
-      return result === 'active';
-    } catch { return false; }
-  };
-  const checkDocker = (name) => {
-    try {
-      const result = execSync(`docker ps --format '{{.Names}}' 2>/dev/null`).toString();
-      return result.includes(name);
-    } catch { return false; }
-  };
+// === DOCKER SERVICE STATUS ===
+app.get('/api/services', async (req, res) => {
+  try {
+    const containers = await docker.listContainers({ all: true });
+    const serviceMap = {};
+    const expectedServices = [
+      'netadmin-unbound', 'netadmin-adguard', 'netadmin-squid',
+      'netadmin-apt-cacher', 'netadmin-lancache', 'netadmin-lancache-dns',
+      'netadmin-kuma', 'netadmin-nginx', 'netadmin-ping',
+      'netadmin-cloudflared'
+    ];
+    const nameMap = {
+      'netadmin-unbound': 'unbound',
+      'netadmin-adguard': 'adguard',
+      'netadmin-squid': 'squid',
+      'netadmin-apt-cacher': 'apt-cacher-ng',
+      'netadmin-lancache': 'lancache',
+      'netadmin-lancache-dns': 'lancache-dns',
+      'netadmin-kuma': 'uptime-kuma',
+      'netadmin-nginx': 'nginx',
+      'netadmin-ping': 'ping_monitor',
+      'netadmin-cloudflared': 'cloudflared',
+    };
+    expectedServices.forEach(svc => {
+      const container = containers.find(c => c.Names.some(n => n === `/${svc}`));
+      const key = nameMap[svc] || svc;
+      serviceMap[key] = container ? container.State === 'running' : false;
+    });
+    res.json(serviceMap);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-  res.json({
-    unbound: checkService('unbound'),
-    adguard: checkService('AdGuardHome'),
-    squid: checkService('squid'),
-    'apt-cacher-ng': checkService('apt-cacher-ng'),
-    nginx: checkService('nginx'),
-    ping_monitor: checkService('netadmin-ping'),
-    lancache: checkDocker('lancache'),
-    'lancache-dns': checkDocker('lancache-dns'),
-    'uptime-kuma': checkDocker('uptime-kuma'),
-    cloudflared: checkService('cloudflared') ||
-      (fs.existsSync('/tmp/cloudflared.pid') && (() => {
-        try { process.kill(parseInt(fs.readFileSync('/tmp/cloudflared.pid', 'utf8')), 0); return true; } catch { return false; }
-      })()),
-  });
+// === SYSTEM INFO (from host via mounted /host-proc) ===
+app.get('/api/system', (req, res) => {
+  try {
+    const uptime = (() => {
+      const secs = parseFloat(fs.readFileSync('/host-proc/uptime', 'utf8').split(' ')[0]);
+      const d = Math.floor(secs / 86400), h = Math.floor((secs % 86400) / 3600), m = Math.floor((secs % 3600) / 60);
+      return `up ${d > 0 ? d + 'd ' : ''}${h}h ${m}m`;
+    })();
+    const meminfo = fs.readFileSync('/host-proc/meminfo', 'utf8');
+    const memTotal = parseInt(meminfo.match(/MemTotal:\s+(\d+)/)?.[1] || 0) / 1024;
+    const memAvail = parseInt(meminfo.match(/MemAvailable:\s+(\d+)/)?.[1] || 0) / 1024;
+    const memUsed = memTotal - memAvail;
+    const memory = `${Math.round(memUsed)}M/${Math.round(memTotal)}M`;
+    const loadavg = fs.readFileSync('/host-proc/loadavg', 'utf8').split(' ');
+    const cpu = parseFloat(loadavg[0]) * 100 / (parseInt(fs.readFileSync('/host-proc/cpuinfo', 'utf8').match(/processor/g)?.length || '1'));
+    let disk = 'N/A';
+    try { disk = execSync("df -h /host-data | awk 'NR==2 {print $3\"/\"$2}'").toString().trim(); } catch {}
+    res.json({ uptime, memory, disk, cpu: Math.round(cpu * 10) / 10 });
+  } catch (e) {
+    res.json({ uptime: 'N/A', memory: 'N/A', disk: 'N/A', cpu: 0 });
+  }
 });
 
 // === PING DATA ===
 app.get('/api/ping', (req, res) => {
   const today = new Date().toISOString().split('T')[0];
-  const logFile = `/var/log/netadmin/ping-${today}.log`;
+  const logFile = `/data/ping-logs/ping-${today}.log`;
   try {
     const lines = fs.readFileSync(logFile, 'utf8').trim().split('\n').slice(-120);
     const data = lines.map(line => {
@@ -486,341 +346,570 @@ app.get('/api/ping', (req, res) => {
   }
 });
 
-// === PING DOWNTIME LOG ===
 app.get('/api/ping/downtime', (req, res) => {
   try {
-    const log = fs.readFileSync('/var/log/netadmin/downtime.log', 'utf8').trim().split('\n').slice(-50);
+    const log = fs.readFileSync('/data/ping-logs/downtime.log', 'utf8').trim().split('\n').slice(-50);
     res.json(log.map(l => { const [time, event] = l.split('|'); return { time: time.trim(), event: event.trim() }; }));
   } catch { res.json([]); }
 });
 
 // === ADGUARD PROXY ===
-app.get('/api/adguard/status', async (req, res) => {
+const proxyAdGuard = (path, method = 'GET') => async (req, res) => {
   try {
-    const r = await fetch(`${ADGUARD_URL}/control/status`);
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (method === 'POST') opts.body = JSON.stringify(req.body);
+    const r = await fetch(`${ADGUARD_URL}${path}`, opts);
     res.json(await r.json());
   } catch (e) { res.status(500).json({ error: e.message }); }
-});
+};
 
-app.get('/api/adguard/stats', async (req, res) => {
-  try {
-    const r = await fetch(`${ADGUARD_URL}/control/stats`);
-    res.json(await r.json());
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/adguard/querylog', async (req, res) => {
-  try {
-    const r = await fetch(`${ADGUARD_URL}/control/querylog?limit=100`);
-    res.json(await r.json());
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/adguard/filtering', async (req, res) => {
-  try {
-    const r = await fetch(`${ADGUARD_URL}/control/filtering/status`);
-    res.json(await r.json());
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/adguard/filtering/add', async (req, res) => {
-  try {
-    const r = await fetch(`${ADGUARD_URL}/control/filtering/add_url`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body),
-    });
-    res.json(await r.json());
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/adguard/filtering/remove', async (req, res) => {
-  try {
-    const r = await fetch(`${ADGUARD_URL}/control/filtering/remove_url`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body),
-    });
-    res.json(await r.json());
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+app.get('/api/adguard/status', proxyAdGuard('/control/status'));
+app.get('/api/adguard/stats', proxyAdGuard('/control/stats'));
+app.get('/api/adguard/querylog', proxyAdGuard('/control/querylog?limit=100'));
+app.get('/api/adguard/filtering', proxyAdGuard('/control/filtering/status'));
+app.post('/api/adguard/filtering/add', proxyAdGuard('/control/filtering/add_url', 'POST'));
+app.post('/api/adguard/filtering/remove', proxyAdGuard('/control/filtering/remove_url', 'POST'));
 
 // === BLOCKLIST LOCAL ===
+const BLOCKLIST_FILE = '/data/adguard/conf/blocklists/colombia_mintic.txt';
+
 app.get('/api/blocklist', (req, res) => {
-  const file = '/opt/AdGuardHome/blocklists/colombia_mintic.txt';
   try {
-    const content = fs.readFileSync(file, 'utf8');
-    const domains = content.split('\n').filter(l => l.trim() && !l.startsWith('#')).map(d => d.trim());
-    res.json(domains);
+    const content = fs.readFileSync(BLOCKLIST_FILE, 'utf8');
+    res.json(content.split('\n').filter(l => l.trim() && !l.startsWith('#')).map(d => d.trim()));
   } catch { res.json([]); }
 });
 
 app.post('/api/blocklist/add', (req, res) => {
-  const { domain } = req.body;
-  const file = '/opt/AdGuardHome/blocklists/colombia_mintic.txt';
-  try {
-    fs.appendFileSync(file, `\n${domain}`);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { fs.appendFileSync(BLOCKLIST_FILE, `\n${req.body.domain}`); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/blocklist/remove', (req, res) => {
-  const { domain } = req.body;
-  const file = '/opt/AdGuardHome/blocklists/colombia_mintic.txt';
   try {
-    const content = fs.readFileSync(file, 'utf8');
-    const filtered = content.split('\n').filter(l => l.trim() !== domain).join('\n');
-    fs.writeFileSync(file, filtered);
+    const content = fs.readFileSync(BLOCKLIST_FILE, 'utf8');
+    fs.writeFileSync(BLOCKLIST_FILE, content.split('\n').filter(l => l.trim() !== req.body.domain).join('\n'));
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// === SQUID CACHE STATS ===
+// === CACHE STATS ===
+const getCacheSize = (path) => {
+  try { return execSync(`du -sh ${path} 2>/dev/null | cut -f1`).toString().trim(); }
+  catch { return '0'; }
+};
+
 app.get('/api/cache/squid', (req, res) => {
+  const size = getCacheSize('/data/squid-cache');
+  let hits = 0, misses = 0, youtube = 0;
   try {
-    const size = execSync("du -sh /var/cache/squid 2>/dev/null | cut -f1").toString().trim();
-    const log = fs.readFileSync('/var/log/squid/access.log', 'utf8');
-    const lines = log.trim().split('\n').slice(-1000);
-    let hits = 0, misses = 0, youtube = 0;
+    const lines = fs.readFileSync('/data/squid-logs/access.log', 'utf8').trim().split('\n').slice(-1000);
     lines.forEach(l => {
-      if (l.includes('HIT')) hits++;
-      else misses++;
+      if (l.includes('HIT')) hits++; else misses++;
       if (l.includes('googlevideo') || l.includes('youtube')) youtube++;
     });
-    res.json({ size, hits, misses, hitRate: hits + misses > 0 ? Math.round(hits / (hits + misses) * 100) : 0, youtube });
-  } catch { res.json({ size: '0', hits: 0, misses: 0, hitRate: 0, youtube: 0 }); }
+  } catch {}
+  res.json({ size, hits, misses, hitRate: hits + misses > 0 ? Math.round(hits / (hits + misses) * 100) : 0, youtube });
 });
 
 app.get('/api/cache/lancache', (req, res) => {
-  try {
-    const size = execSync("du -sh /var/cache/lancache/data 2>/dev/null | cut -f1").toString().trim();
-    res.json({ size, status: 'active' });
-  } catch { res.json({ size: '0', status: 'unknown' }); }
+  res.json({ size: getCacheSize('/data/lancache-data'), status: 'active' });
 });
 
 app.get('/api/cache/apt', (req, res) => {
-  try {
-    const size = execSync("du -sh /var/cache/apt-cacher-ng 2>/dev/null | cut -f1").toString().trim();
-    res.json({ size });
-  } catch { res.json({ size: '0' }); }
+  res.json({ size: getCacheSize('/data/apt-cache') });
 });
 
 app.get('/api/cache/nginx', (req, res) => {
-  try {
-    const size = execSync("du -sh /var/cache/nginx/cdn 2>/dev/null | cut -f1").toString().trim();
-    res.json({ size });
-  } catch { res.json({ size: '0' }); }
+  res.json({ size: getCacheSize('/data/nginx-cache') });
 });
 
 // === CLOUDFLARE TUNNEL ===
-app.get('/api/tunnel/status', (req, res) => {
+app.get('/api/tunnel/status', async (req, res) => {
   try {
-    const status = execSync('netadmin-tunnel status 2>/dev/null').toString().trim();
+    const containers = await docker.listContainers({ all: true });
+    const cf = containers.find(c => c.Names.some(n => n === '/netadmin-cloudflared'));
+    const active = cf ? cf.State === 'running' : false;
     let url = '';
-    try { url = fs.readFileSync('/var/log/netadmin/tunnel-url.txt', 'utf8').trim(); } catch {}
-    res.json({ active: status === 'ACTIVE', url });
+    try { url = fs.readFileSync('/data/tunnel-url.txt', 'utf8').trim(); } catch {}
+    res.json({ active, url });
   } catch { res.json({ active: false, url: '' }); }
 });
 
-app.post('/api/tunnel/start', (req, res) => {
-  const { token } = req.body || {};
+app.post('/api/tunnel/start', async (req, res) => {
   try {
-    exec(`netadmin-tunnel start ${token || ''}`);
-    setTimeout(() => {
-      let url = '';
-      try { url = fs.readFileSync('/var/log/netadmin/tunnel-url.txt', 'utf8').trim(); } catch {}
-      res.json({ success: true, url });
-    }, 6000);
+    // Start the cloudflared container
+    execSync('docker start netadmin-cloudflared 2>/dev/null || true');
+    // Wait for URL
+    await new Promise(r => setTimeout(r, 6000));
+    // Try to get URL from container logs
+    try {
+      const logs = execSync('docker logs netadmin-cloudflared 2>&1 | grep -oP "https://[a-z0-9-]+\\.trycloudflare\\.com" | tail -1').toString().trim();
+      if (logs) fs.writeFileSync('/data/tunnel-url.txt', logs);
+    } catch {}
+    let url = '';
+    try { url = fs.readFileSync('/data/tunnel-url.txt', 'utf8').trim(); } catch {}
+    res.json({ success: true, url });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/tunnel/stop', (req, res) => {
+app.post('/api/tunnel/stop', async (req, res) => {
   try {
-    execSync('netadmin-tunnel stop');
+    execSync('docker stop netadmin-cloudflared 2>/dev/null || true');
+    try { fs.unlinkSync('/data/tunnel-url.txt'); } catch {}
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// === SYSTEM INFO ===
-app.get('/api/system', (req, res) => {
-  try {
-    const uptime = execSync('uptime -p').toString().trim();
-    const memory = execSync("free -h | awk '/^Mem:/ {print $3\"/\"$2}'").toString().trim();
-    const disk = execSync("df -h / | awk 'NR==2 {print $3\"/\"$2}'").toString().trim();
-    const cpu = execSync("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'").toString().trim();
-    res.json({ uptime, memory, disk, cpu: parseFloat(cpu) || 0 });
-  } catch { res.json({ uptime: 'N/A', memory: 'N/A', disk: 'N/A', cpu: 0 }); }
-});
-
 app.listen(API_PORT, '0.0.0.0', () => {
-  console.log(`NetAdmin API → http://0.0.0.0:${API_PORT}`);
+  console.log(`NetAdmin API v4.0 → http://0.0.0.0:${API_PORT}`);
 });
-API_SERVER
+API_JS
 
-cd /opt/netadmin-api && npm install --production --silent
-
-# Crear variable de entorno para la contraseña
-cat > /opt/netadmin-api/.env << ENV_FILE
-API_PORT=$API_PORT
-PANEL_PASS=$PANEL_PASS
-ENV_FILE
-
-# Servicio systemd para la API
-cat > /etc/systemd/system/netadmin-api.service << API_SVC
-[Unit]
-Description=NetAdmin API Server
-After=network.target
-[Service]
-Type=simple
-WorkingDirectory=/opt/netadmin-api
-EnvironmentFile=/opt/netadmin-api/.env
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-API_SVC
-
-systemctl daemon-reload && systemctl enable netadmin-api && systemctl start netadmin-api
-success "API Backend → http://0.0.0.0:$API_PORT"
+cat > ${NETADMIN_DIR}/api/Dockerfile << 'DOCKERFILE'
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json .
+RUN npm install --production --silent
+COPY server.js .
+EXPOSE 4000
+CMD ["node", "server.js"]
+DOCKERFILE
 
 # ============================================================
-# 10. NGINX — Servir Panel Web + Proxy API
+# 7. PING MONITOR CONTAINER
 # ============================================================
-log "Configurando Nginx para panel web..."
+log "Generando monitor de ping..."
 
-# El panel se construirá con el frontend React
-mkdir -p /var/www/netadmin
+cat > ${NETADMIN_DIR}/configs/ping-monitor.sh << 'PING_SCRIPT'
+#!/bin/bash
+LOG_DIR="/data"
+WAS_DOWN=false
+while true; do
+  TS=$(date '+%Y-%m-%d %H:%M:%S')
+  LOG_FILE="$LOG_DIR/ping-$(date +%Y-%m-%d).log"
+  RESULT=$(ping -c 1 -W 3 8.8.8.8 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    LAT=$(echo "$RESULT" | grep 'time=' | sed 's/.*time=\([0-9.]*\).*/\1/')
+    echo "$TS|OK|${LAT}" >> "$LOG_FILE"
+    [ "$WAS_DOWN" = true ] && echo "$TS|RECOVERED" >> "$LOG_DIR/downtime.log" && WAS_DOWN=false
+  else
+    echo "$TS|FAIL|0" >> "$LOG_FILE"
+    [ "$WAS_DOWN" = false ] && echo "$TS|DOWN" >> "$LOG_DIR/downtime.log" && WAS_DOWN=true
+  fi
+  sleep 5
+done
+PING_SCRIPT
+chmod +x ${NETADMIN_DIR}/configs/ping-monitor.sh
 
-cat > /etc/nginx/sites-available/netadmin << NGINX_CONF
-server {
-    listen ${PANEL_PORT};
-    server_name _;
-    root /var/www/netadmin;
-    index index.html;
+# ============================================================
+# 8. NGINX CONFIG
+# ============================================================
+log "Generando configuración Nginx..."
 
-    # Panel SPA
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
-
-    # Proxy a la API
-    location /api/ {
-        proxy_pass http://127.0.0.1:${API_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_read_timeout 30s;
-    }
-
-    # Proxy a Uptime Kuma
-    location /kuma/ {
-        proxy_pass http://127.0.0.1:${KUMA_PORT}/;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-
-# CDN Cache (puerto 8888)
 NGINX_CACHE_MB=$((NGINX_CACHE_GB * 1000))
-proxy_cache_path /var/cache/nginx/cdn levels=1:2 keys_zone=cdn_cache:200m max_size=${NGINX_CACHE_GB}g inactive=30d use_temp_path=off;
-server {
-    listen 8888;
-    server_name _;
-    add_header X-Cache-Status \$upstream_cache_status always;
-    location / {
-        proxy_cache cdn_cache;
-        proxy_cache_valid 200 302 30d;
-        proxy_cache_valid 404 1m;
-        proxy_cache_use_stale error timeout updating;
-        proxy_cache_lock on;
-        proxy_buffering on;
-        proxy_max_temp_file_size 4096m;
-        proxy_set_header Host \$host;
-        proxy_pass http://\$host\$request_uri;
+cat > ${NETADMIN_DIR}/configs/nginx.conf << NGINX_CONF
+worker_processes auto;
+events { worker_connections 1024; }
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    gzip on;
+
+    # Panel Web + API proxy
+    server {
+        listen 80;
+        server_name _;
+        root /var/www/netadmin;
+        index index.html;
+
+        location / {
+            try_files \$uri \$uri/ /index.html;
+        }
+
+        location /api/ {
+            proxy_pass http://netadmin-api:4000;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_read_timeout 30s;
+        }
+
+        location /kuma/ {
+            proxy_pass http://netadmin-kuma:3001/;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
     }
-    location /cache-status {
-        stub_status on;
-        allow 127.0.0.1;
-        allow 192.168.0.0/16;
-        deny all;
+
+    # CDN Cache (puerto 8888)
+    proxy_cache_path /var/cache/nginx/cdn levels=1:2 keys_zone=cdn_cache:200m max_size=${NGINX_CACHE_GB}g inactive=30d use_temp_path=off;
+
+    server {
+        listen 8888;
+        server_name _;
+        add_header X-Cache-Status \$upstream_cache_status always;
+
+        location / {
+            proxy_cache cdn_cache;
+            proxy_cache_valid 200 302 30d;
+            proxy_cache_valid 404 1m;
+            proxy_cache_use_stale error timeout updating;
+            proxy_cache_lock on;
+            proxy_buffering on;
+            proxy_max_temp_file_size 4096m;
+            proxy_set_header Host \$host;
+            proxy_pass http://\$host\$request_uri;
+        }
     }
 }
 NGINX_CONF
 
-rm -f /etc/nginx/sites-enabled/default
-ln -sf /etc/nginx/sites-available/netadmin /etc/nginx/sites-enabled/
-mkdir -p /var/cache/nginx/cdn
-nginx -t && systemctl restart nginx && systemctl enable nginx
-success "Nginx → puerto $PANEL_PORT (panel) + 8888 (CDN cache)"
-
 # Crear página de espera
-cat > /var/www/netadmin/index.html << 'WAIT_HTML'
+mkdir -p ${NETADMIN_DIR}/web
+cat > ${NETADMIN_DIR}/web/index.html << 'WAIT_HTML'
 <!DOCTYPE html>
 <html><head><title>NetAdmin</title>
 <style>body{background:#0f1419;color:#14b8a6;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
 .c{text-align:center}h1{font-size:2rem}p{color:#64748b;margin-top:1rem}</style></head>
-<body><div class="c"><h1>NetAdmin</h1><p>Panel instalado. Sube el build del frontend a /var/www/netadmin/</p>
-<p>O usa: scp -r dist/* root@tu-vps:/var/www/netadmin/</p></div></body></html>
+<body><div class="c"><h1>NetAdmin v4.0</h1><p>Panel instalado. Sube el build del frontend.</p>
+<p>scp -r dist/* root@tu-vps:/opt/netadmin/web/</p></div></body></html>
 WAIT_HTML
 
 # ============================================================
-# 11. NETADMIN-STATUS
+# 9. BLOCKLISTS
 # ============================================================
+mkdir -p ${NETADMIN_DIR}/data/adguard/conf/blocklists
+cat > ${NETADMIN_DIR}/data/adguard/conf/blocklists/colombia_mintic.txt << 'BLOCKLIST'
+# NetAdmin — Lista Colombia (MinTIC + Coljuegos + Infantil)
+# Agrega dominios según resoluciones vigentes
+BLOCKLIST
+
+# ============================================================
+# 10. DOCKER COMPOSE — TODOS LOS SERVICIOS
+# ============================================================
+log "Generando docker-compose.yml..."
+
+cat > ${NETADMIN_DIR}/docker-compose.yml << COMPOSE
+version: '3.8'
+
+services:
+  # ── DNS Recursivo ──
+  unbound:
+    image: mvance/unbound:latest
+    container_name: netadmin-unbound
+    volumes:
+      - ./configs/unbound.conf:/etc/unbound/unbound.conf:ro
+      - ./configs/root.hints:/etc/unbound/root.hints:ro
+      - ./data/unbound:/var/lib/unbound
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.10
+    restart: unless-stopped
+
+  # ── Filtrado DNS ──
+  adguard:
+    image: adguard/adguardhome:latest
+    container_name: netadmin-adguard
+    volumes:
+      - ./data/adguard/work:/opt/adguardhome/work
+      - ./data/adguard/conf:/opt/adguardhome/conf
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "3000:3000/tcp"
+    environment:
+      - UPSTREAM_DNS=172.20.0.10:53
+    depends_on:
+      - unbound
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.11
+    restart: unless-stopped
+
+  # ── Proxy Caché SSL Bump ──
+  squid:
+    build:
+      context: .
+      dockerfile: Dockerfile.squid
+    container_name: netadmin-squid
+    volumes:
+      - ./data/squid-cache:/var/cache/squid
+      - ./data/squid-logs:/var/log/squid
+      - ./certs/netadmin-ca.pem:/etc/squid/ssl_cert/netadmin-ca.pem:ro
+    ports:
+      - "3128:3128"
+      - "3129:3129"
+      - "3130:3130"
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.12
+    restart: unless-stopped
+
+  # ── Caché Repos Linux ──
+  apt-cacher:
+    image: sameersbn/apt-cacher-ng:latest
+    container_name: netadmin-apt-cacher
+    volumes:
+      - ./data/apt-cache:/var/cache/apt-cacher-ng
+    ports:
+      - "3142:3142"
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.13
+    restart: unless-stopped
+
+  # ── Caché Gaming/Windows ──
+  lancache-dns:
+    image: lancachenet/lancache-dns:latest
+    container_name: netadmin-lancache-dns
+    environment:
+      - USE_GENERIC_CACHE=true
+      - LANCACHE_IP=172.20.0.15
+      - UPSTREAM_DNS=172.20.0.10
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.14
+    depends_on:
+      - unbound
+    restart: unless-stopped
+
+  lancache:
+    image: lancachenet/monolithic:latest
+    container_name: netadmin-lancache
+    environment:
+      - CACHE_MEM_SIZE=${LANCACHE_CACHE_MEM}g
+      - CACHE_DISK_SIZE=${LANCACHE_CACHE_GB}g
+      - CACHE_MAX_AGE=30d
+    volumes:
+      - ./data/lancache/data:/data/cache
+      - ./data/lancache/logs:/data/logs
+    ports:
+      - "8880:80"
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.15
+    restart: unless-stopped
+
+  # ── Monitoreo ──
+  kuma:
+    image: louislam/uptime-kuma:1
+    container_name: netadmin-kuma
+    volumes:
+      - ./data/kuma:/app/data
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.16
+    restart: unless-stopped
+
+  # ── Monitor de Ping ──
+  ping:
+    image: bash:latest
+    container_name: netadmin-ping
+    volumes:
+      - ./configs/ping-monitor.sh:/ping-monitor.sh:ro
+      - ./data/ping-logs:/data
+    command: ["/ping-monitor.sh"]
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.17
+    restart: unless-stopped
+
+  # ── API Backend ──
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: netadmin-api
+    environment:
+      - API_PORT=4000
+      - PANEL_PASS=${PANEL_PASS}
+      - ADGUARD_URL=http://netadmin-adguard:3000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host-proc:ro
+      - ./data:/data:ro
+      - ./data/squid-cache:/data/squid-cache:ro
+      - ./data/lancache/data:/data/lancache-data:ro
+      - ./data/apt-cache:/data/apt-cache:ro
+      - ./data/nginx-cache:/data/nginx-cache:ro
+      - ./data/ping-logs:/data/ping-logs:ro
+      - ./data/squid-logs:/data/squid-logs:ro
+      - ./data/adguard/conf:/data/adguard/conf
+      - ${NETADMIN_DIR}:/host-data:ro
+    depends_on:
+      - adguard
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.18
+    restart: unless-stopped
+
+  # ── Web Server ──
+  nginx:
+    image: nginx:alpine
+    container_name: netadmin-nginx
+    volumes:
+      - ./configs/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./web:/var/www/netadmin:ro
+      - ./data/nginx-cache:/var/cache/nginx/cdn
+    ports:
+      - "${PANEL_PORT}:80"
+      - "8888:8888"
+    depends_on:
+      - api
+      - kuma
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.19
+    restart: unless-stopped
+
+  # ── Cloudflare Tunnel (detenido por defecto) ──
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: netadmin-cloudflared
+    command: tunnel --no-autoupdate --url http://netadmin-nginx:80
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.20
+    restart: "no"
+
+networks:
+  netadmin:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+COMPOSE
+
+# Si hay token de CF, cambiar el command
+if [ -n "$CF_TUNNEL_TOKEN" ]; then
+  sed -i "s|command: tunnel --no-autoupdate --url http://netadmin-nginx:80|command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}|" ${NETADMIN_DIR}/docker-compose.yml
+  # Auto-start con token
+  sed -i 's/restart: "no"/restart: unless-stopped/' ${NETADMIN_DIR}/docker-compose.yml
+fi
+
+# ============================================================
+# 11. LEVANTAR TODO
+# ============================================================
+log "Construyendo imágenes y levantando servicios..."
+cd ${NETADMIN_DIR}
+docker compose build --quiet
+docker compose up -d
+
+success "¡Todos los contenedores levantados!"
+
+# ============================================================
+# 12. CLI TOOLS
+# ============================================================
+log "Instalando comandos CLI..."
+
 cat > /usr/local/bin/netadmin-status << 'STATUS'
 #!/bin/bash
 G='\033[0;32m';R='\033[0;31m';C='\033[0;36m';Y='\033[1;33m';N='\033[0m'
 echo -e "${C}══════════════════════════════════════════${N}"
-echo -e "${C}   NetAdmin v2.0 — Estado de Servicios${N}"
+echo -e "${C}   NetAdmin v4.0 — Estado (Docker)${N}"
 echo -e "${C}══════════════════════════════════════════${N}"
 echo ""
-cs() { systemctl is-active --quiet "$1" 2>/dev/null && echo -e "  ${G}●${N} $2" || echo -e "  ${R}●${N} $2 ${R}(inactivo)${N}"; }
-cs "unbound" "Unbound DNS"
-cs "AdGuardHome" "AdGuard Home"
-cs "squid" "Squid Proxy (SSL Bump)"
-cs "apt-cacher-ng" "apt-cacher-ng"
-cs "nginx" "Nginx (Panel + CDN)"
-cs "netadmin-api" "API Backend"
-cs "netadmin-ping" "Monitor de Ping"
-echo ""
-for c in lancache lancache-dns uptime-kuma; do
-  docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${c}$" && echo -e "  ${G}●${N} $c (Docker)" || echo -e "  ${R}●${N} $c ${R}(detenido)${N}"
+for c in netadmin-unbound netadmin-adguard netadmin-squid netadmin-apt-cacher \
+         netadmin-lancache netadmin-lancache-dns netadmin-kuma netadmin-ping \
+         netadmin-api netadmin-nginx netadmin-cloudflared; do
+  STATE=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null)
+  NAME=$(echo "$c" | sed 's/netadmin-//')
+  if [ "$STATE" = "running" ]; then
+    echo -e "  ${G}●${N} ${NAME}"
+  elif [ -n "$STATE" ]; then
+    echo -e "  ${Y}●${N} ${NAME} (${STATE})"
+  else
+    echo -e "  ${R}●${N} ${NAME} (no existe)"
+  fi
 done
-echo ""
-TS=$(netadmin-tunnel status 2>/dev/null)
-if [ "$TS" = "ACTIVE" ]; then
-  echo -e "  ${G}●${N} Cloudflare Tunnel"
-  URL=$(cat /var/log/netadmin/tunnel-url.txt 2>/dev/null)
-  [ -n "$URL" ] && echo -e "    URL: ${C}${URL}${N}"
-else
-  echo -e "  ${R}●${N} Cloudflare Tunnel ${Y}(netadmin-tunnel start)${N}"
-fi
 echo ""
 P=$(ping -c 1 -W 2 8.8.8.8 2>/dev/null | grep 'time=' | sed 's/.*time=\([0-9.]*\).*/\1/')
 [ -n "$P" ] && echo -e "  Latencia: ${G}${P}ms${N}" || echo -e "  Latencia: ${R}Sin conexión${N}"
 echo ""
-for d in /var/cache/squid /var/cache/nginx/cdn /var/cache/lancache/data /var/cache/apt-cacher-ng; do
-  [ -d "$d" ] && echo -e "  Cache $(basename $d): ${C}$(du -sh $d 2>/dev/null | cut -f1)${N}"
+for d in /opt/netadmin/data/squid-cache /opt/netadmin/data/lancache/data /opt/netadmin/data/nginx-cache /opt/netadmin/data/apt-cache; do
+  [ -d "$d" ] && echo -e "  Cache $(basename $(dirname $d))/$(basename $d): ${C}$(du -sh $d 2>/dev/null | cut -f1)${N}"
 done
 echo ""
 STATUS
 chmod +x /usr/local/bin/netadmin-status
 
+cat > /usr/local/bin/netadmin-tunnel << 'TUNNEL'
+#!/bin/bash
+case "$1" in
+  start)
+    docker start netadmin-cloudflared 2>/dev/null
+    sleep 6
+    URL=$(docker logs netadmin-cloudflared 2>&1 | grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1)
+    [ -n "$URL" ] && echo "$URL" > /opt/netadmin/data/tunnel-url.txt
+    echo "Túnel activo: ${URL:-esperando URL...}"
+    ;;
+  stop)
+    docker stop netadmin-cloudflared 2>/dev/null
+    rm -f /opt/netadmin/data/tunnel-url.txt
+    echo "Túnel detenido"
+    ;;
+  status)
+    STATE=$(docker inspect -f '{{.State.Status}}' netadmin-cloudflared 2>/dev/null)
+    [ "$STATE" = "running" ] && echo "ACTIVE" || echo "INACTIVE"
+    ;;
+  url)
+    cat /opt/netadmin/data/tunnel-url.txt 2>/dev/null || echo ""
+    ;;
+  logs)
+    docker logs --tail 50 netadmin-cloudflared 2>&1
+    ;;
+  *)
+    echo "Uso: netadmin-tunnel {start|stop|status|url|logs}"
+    ;;
+esac
+TUNNEL
+chmod +x /usr/local/bin/netadmin-tunnel
+
+# Alias de gestión
+cat > /usr/local/bin/netadmin << 'MGMT'
+#!/bin/bash
+CD="/opt/netadmin"
+case "$1" in
+  up)      cd $CD && docker compose up -d ;;
+  down)    cd $CD && docker compose down ;;
+  restart) cd $CD && docker compose restart ${2:-} ;;
+  logs)    cd $CD && docker compose logs -f --tail=50 ${2:-} ;;
+  update)  cd $CD && docker compose pull && docker compose up -d ;;
+  ps)      cd $CD && docker compose ps ;;
+  status)  netadmin-status ;;
+  *)
+    echo "NetAdmin v4.0 — Gestión Docker"
+    echo ""
+    echo "  netadmin up        — Levantar todo"
+    echo "  netadmin down      — Detener todo"
+    echo "  netadmin restart   — Reiniciar (o un servicio)"
+    echo "  netadmin logs      — Ver logs (o de un servicio)"
+    echo "  netadmin update    — Actualizar imágenes"
+    echo "  netadmin ps        — Estado de contenedores"
+    echo "  netadmin status    — Estado completo"
+    ;;
+esac
+MGMT
+chmod +x /usr/local/bin/netadmin
+
 # ============================================================
-# 12. FIREWALL
+# 13. FIREWALL
 # ============================================================
 log "Configurando firewall..."
+apt-get install -y -qq ufw
 ufw default deny incoming && ufw default allow outgoing
 ufw allow ssh
-ufw allow 53/tcp && ufw allow 53/udp  # DNS
-ufw allow $PANEL_PORT/tcp              # Panel web
-ufw allow $API_PORT/tcp                # API
-ufw allow $ADGUARD_PORT/tcp            # AdGuard UI
-ufw allow 3128/tcp                     # Squid
-ufw allow 3142/tcp                     # apt-cacher-ng
-ufw allow 8880/tcp                     # Lancache
-ufw allow 8888/tcp                     # Nginx CDN
-ufw allow $KUMA_PORT/tcp               # Uptime Kuma
+ufw allow 53/tcp && ufw allow 53/udp
+ufw allow ${PANEL_PORT}/tcp
+ufw allow 3128/tcp
+ufw allow 3142/tcp
+ufw allow 8880/tcp
+ufw allow 8888/tcp
 echo "y" | ufw enable
 success "Firewall configurado"
 
@@ -829,32 +918,38 @@ success "Firewall configurado"
 # ============================================================
 echo ""
 echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}   ¡INSTALACIÓN COMPLETADA — NetAdmin v3.0!${NC}"
+echo -e "${GREEN}   ¡INSTALACIÓN COMPLETADA — NetAdmin v4.0 Docker!${NC}"
 echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
 echo ""
+echo -e "  ${CYAN}Todo corre en:${NC} /opt/netadmin/docker-compose.yml"
+echo ""
 echo -e "  ${CYAN}Panel Web:${NC}        http://${IP_ADDR}:${PANEL_PORT}"
-echo -e "  ${CYAN}API Backend:${NC}      http://${IP_ADDR}:${API_PORT}"
-echo -e "  ${CYAN}AdGuard Home:${NC}     http://${IP_ADDR}:${ADGUARD_PORT}"
-echo -e "  ${CYAN}Uptime Kuma:${NC}      http://${IP_ADDR}:${KUMA_PORT}"
-echo -e "  ${CYAN}Contraseña panel:${NC} ${YELLOW}${PANEL_PASS}${NC}"
+echo -e "  ${CYAN}AdGuard Home:${NC}     http://${IP_ADDR}:3000"
+echo -e "  ${CYAN}Uptime Kuma:${NC}      http://${IP_ADDR}:${PANEL_PORT}/kuma/"
+echo -e "  ${CYAN}Contraseña:${NC}       ${YELLOW}${PANEL_PASS}${NC}"
 echo ""
 echo -e "  ${CYAN}Caché configurada:${NC}"
-echo -e "    Squid (YouTube):   ${GREEN}${SQUID_CACHE_GB} GB${NC} (RAM: ${SQUID_CACHE_MEM} MB) → ${IP_ADDR}:3128"
-echo -e "    Lancache:          ${GREEN}${LANCACHE_CACHE_GB} GB${NC} (RAM: ${LANCACHE_CACHE_MEM} GB) → ${IP_ADDR}:8880"
-echo -e "    Nginx CDN:         ${GREEN}${NGINX_CACHE_GB} GB${NC} → ${IP_ADDR}:8888"
-echo -e "    apt-cacher-ng:     sin límite → ${IP_ADDR}:3142"
+echo -e "    Squid (YouTube):   ${GREEN}${SQUID_CACHE_GB} GB${NC} (RAM: ${SQUID_CACHE_MEM} MB)"
+echo -e "    Lancache:          ${GREEN}${LANCACHE_CACHE_GB} GB${NC} (RAM: ${LANCACHE_CACHE_MEM} GB)"
+echo -e "    Nginx CDN:         ${GREEN}${NGINX_CACHE_GB} GB${NC}"
 echo -e "    Total:             ${GREEN}$((SQUID_CACHE_GB + LANCACHE_CACHE_GB + NGINX_CACHE_GB)) GB${NC}"
 echo ""
-echo -e "  ${CYAN}Comandos:${NC}"
-echo -e "    ${YELLOW}netadmin-status${NC}          — Estado de todo"
-echo -e "    ${YELLOW}netadmin-tunnel start${NC}    — Activar túnel CF (genera URL)"
-echo -e "    ${YELLOW}netadmin-tunnel stop${NC}     — Desactivar túnel"
+echo -e "  ${CYAN}Gestión:${NC}"
+echo -e "    ${YELLOW}netadmin status${NC}      — Estado de todo"
+echo -e "    ${YELLOW}netadmin up/down${NC}     — Levantar/detener"
+echo -e "    ${YELLOW}netadmin update${NC}      — Actualizar imágenes"
+echo -e "    ${YELLOW}netadmin logs [svc]${NC}  — Ver logs"
+echo -e "    ${YELLOW}netadmin restart${NC}     — Reiniciar todo"
+echo -e "    ${YELLOW}netadmin-tunnel start${NC}— Túnel Cloudflare"
 echo ""
-echo -e "  ${CYAN}Desplegar panel web:${NC}"
-echo -e "    ${YELLOW}scp -r dist/* root@${IP_ADDR}:/var/www/netadmin/${NC}"
+echo -e "  ${CYAN}Desplegar panel:${NC}"
+echo -e "    ${YELLOW}scp -r dist/* root@${IP_ADDR}:/opt/netadmin/web/${NC}"
 echo ""
-echo -e "  ${CYAN}DNS para tus dispositivos:${NC} ${GREEN}${IP_ADDR}${NC}"
-echo -e "  ${CYAN}Proxy HTTP:${NC}               ${GREEN}${IP_ADDR}:3128${NC}"
+echo -e "  ${CYAN}DNS:${NC}   ${GREEN}${IP_ADDR}${NC}"
+echo -e "  ${CYAN}Proxy:${NC} ${GREEN}${IP_ADDR}:3128${NC}"
 echo ""
-echo -e "  ${YELLOW}⚠ Certificado SSL Bump:${NC} /etc/squid/ssl_cert/netadmin-ca.pem"
+echo -e "  ${YELLOW}⚠ Cert SSL Bump:${NC} /opt/netadmin/certs/netadmin-ca.pem"
 echo ""
+
+# Mostrar estado
+netadmin-status
