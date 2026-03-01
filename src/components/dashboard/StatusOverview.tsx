@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse, RefreshCw } from "lucide-react";
+import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse, RefreshCw, Copy, CheckCircle, Info } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Services {
@@ -31,6 +31,7 @@ export function StatusOverview() {
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [pingStats, setPingStats] = useState({ current: 0, avg: 0 });
   const [loading, setLoading] = useState(true);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -58,6 +59,21 @@ export function StatusOverview() {
   const onlineCount = Object.values(services).filter(Boolean).length;
   const totalCount = Object.keys(services).length;
 
+  // Detect the server IP from the current page URL
+  const serverIp = typeof window !== "undefined" ? window.location.hostname : "IP_DEL_SERVIDOR";
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const CopyButton = ({ text, field }: { text: string; field: string }) => (
+    <button onClick={() => copyToClipboard(text, field)} className="text-muted-foreground hover:text-foreground transition-colors shrink-0 ml-2">
+      {copiedField === field ? <CheckCircle className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+
   return (
     <div>
       <div className="mb-8">
@@ -83,6 +99,96 @@ export function StatusOverview() {
           ))}
         </div>
       )}
+
+      {/* DNS Configuration for Clients */}
+      <div className="card-glow rounded-lg p-5 mb-6 border-2 border-primary/30">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-md bg-primary/20">
+            <Wifi className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Configuración DNS para tus Clientes</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Configura estos valores en el router o en cada dispositivo</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* DNS Config */}
+          <div className="bg-secondary/30 rounded-lg p-4">
+            <h4 className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
+              <Globe className="h-3.5 w-3.5 text-primary" />
+              DNS (Bloqueo de Ads + Seguridad)
+            </h4>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between bg-card rounded-md px-3 py-2 border border-border">
+                <div>
+                  <p className="text-xs text-muted-foreground">DNS Primario</p>
+                  <p className="text-sm font-mono font-bold text-primary">{serverIp}</p>
+                </div>
+                <CopyButton text={serverIp} field="dns-primary" />
+              </div>
+              <div className="flex items-center justify-between bg-card rounded-md px-3 py-2 border border-border">
+                <div>
+                  <p className="text-xs text-muted-foreground">DNS Secundario (respaldo)</p>
+                  <p className="text-sm font-mono font-bold text-muted-foreground">8.8.8.8</p>
+                </div>
+                <CopyButton text="8.8.8.8" field="dns-secondary" />
+              </div>
+              <div className="flex items-center justify-between bg-card rounded-md px-3 py-2 border border-border">
+                <div>
+                  <p className="text-xs text-muted-foreground">Puerto DNS</p>
+                  <p className="text-sm font-mono font-bold text-muted-foreground">53 (predeterminado)</p>
+                </div>
+                <CopyButton text="53" field="dns-port" />
+              </div>
+            </div>
+          </div>
+
+          {/* Proxy Config */}
+          <div className="bg-secondary/30 rounded-lg p-4">
+            <h4 className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
+              <MonitorSpeaker className="h-3.5 w-3.5 text-primary" />
+              Proxy Caché (YouTube, HTTPS)
+            </h4>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between bg-card rounded-md px-3 py-2 border border-border">
+                <div>
+                  <p className="text-xs text-muted-foreground">Proxy HTTP/HTTPS</p>
+                  <p className="text-sm font-mono font-bold text-primary">{serverIp}:3128</p>
+                </div>
+                <CopyButton text={`${serverIp}:3128`} field="proxy" />
+              </div>
+              <div className="flex items-center justify-between bg-card rounded-md px-3 py-2 border border-border">
+                <div>
+                  <p className="text-xs text-muted-foreground">apt-cacher-ng (repos Linux)</p>
+                  <p className="text-sm font-mono font-bold text-primary">{serverIp}:3142</p>
+                </div>
+                <CopyButton text={`${serverIp}:3142`} field="apt-cache" />
+              </div>
+              <div className="flex items-center justify-between bg-card rounded-md px-3 py-2 border border-border">
+                <div>
+                  <p className="text-xs text-muted-foreground">Certificado SSL (para HTTPS cache)</p>
+                  <p className="text-xs font-mono text-warning break-all">/etc/squid/ssl_cert/netadmin-ca.pem</p>
+                </div>
+                <CopyButton text="/etc/squid/ssl_cert/netadmin-ca.pem" field="cert" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick setup instructions */}
+        <div className="mt-4 p-3 rounded-md bg-primary/5 border border-primary/20">
+          <div className="flex items-start gap-2">
+            <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p><strong className="text-foreground">Router/MikroTik:</strong> Cambia el DNS primario a <span className="text-primary font-mono">{serverIp}</span> en DHCP → DNS Settings</p>
+              <p><strong className="text-foreground">Windows:</strong> Panel de control → Red → Adaptador → IPv4 → DNS: <span className="text-primary font-mono">{serverIp}</span></p>
+              <p><strong className="text-foreground">Android/iOS:</strong> WiFi → Configuración avanzada → DNS: <span className="text-primary font-mono">{serverIp}</span></p>
+              <p><strong className="text-foreground">⚠ HTTPS cache:</strong> Instalar el certificado CA en cada dispositivo para evitar errores SSL</p>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Services grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

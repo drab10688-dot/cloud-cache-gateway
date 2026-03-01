@@ -1,22 +1,55 @@
-import { useState } from "react";
-import { HeartPulse, ExternalLink, Plus, Settings } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { HeartPulse, ExternalLink, Plus, Settings, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 
 const KUMA_URL = "/kuma/";
 
-const defaultMonitors = [
-  { id: 1, name: "Google DNS", type: "ping", target: "8.8.8.8", status: "up", uptime: "99.98%", ping: "12ms" },
-  { id: 2, name: "Cloudflare DNS", type: "ping", target: "1.1.1.1", status: "up", uptime: "99.99%", ping: "8ms" },
-  { id: 3, name: "AdGuard Home", type: "http", target: "http://localhost:3000", status: "up", uptime: "100%", ping: "2ms" },
-  { id: 4, name: "Squid Proxy", type: "port", target: "localhost:3128", status: "up", uptime: "99.95%", ping: "1ms" },
-  { id: 5, name: "Nginx CDN", type: "http", target: "http://localhost:8888", status: "up", uptime: "100%", ping: "1ms" },
-  { id: 6, name: "Lancache", type: "port", target: "localhost:8880", status: "up", uptime: "99.90%", ping: "3ms" },
-  { id: 7, name: "apt-cacher-ng", type: "port", target: "localhost:3142", status: "up", uptime: "100%", ping: "1ms" },
-  { id: 8, name: "NetAdmin API", type: "http", target: "http://localhost:4000/api/services", status: "up", uptime: "100%", ping: "5ms" },
+interface Monitor {
+  id: number;
+  name: string;
+  type: string;
+  target: string;
+  status: string;
+  uptime: string;
+  ping: string;
+}
+
+const fallbackMonitors: Monitor[] = [
+  { id: 1, name: "Google DNS", type: "ping", target: "8.8.8.8", status: "up", uptime: "—", ping: "—" },
+  { id: 2, name: "Cloudflare DNS", type: "ping", target: "1.1.1.1", status: "up", uptime: "—", ping: "—" },
+  { id: 3, name: "AdGuard Home", type: "http", target: "http://localhost:3000", status: "up", uptime: "—", ping: "—" },
+  { id: 4, name: "Squid Proxy", type: "port", target: "localhost:3128", status: "up", uptime: "—", ping: "—" },
+  { id: 5, name: "Nginx CDN", type: "http", target: "http://localhost:8888", status: "up", uptime: "—", ping: "—" },
+  { id: 6, name: "Lancache", type: "port", target: "localhost:8880", status: "up", uptime: "—", ping: "—" },
+  { id: 7, name: "apt-cacher-ng", type: "port", target: "localhost:3142", status: "up", uptime: "—", ping: "—" },
+  { id: 8, name: "NetAdmin API", type: "http", target: "http://localhost:4000/api/services", status: "up", uptime: "—", ping: "—" },
 ];
 
 export function UptimeKumaPanel() {
-  const [monitors] = useState(defaultMonitors);
+  const [monitors, setMonitors] = useState<Monitor[]>(fallbackMonitors);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchMonitors = useCallback(async () => {
+    try {
+      const data = await api.getKumaMonitors();
+      if (Array.isArray(data) && data.length > 0) {
+        setMonitors(data);
+        setError(null);
+      }
+    } catch {
+      setError("No se pudo conectar con Uptime Kuma — mostrando datos de ejemplo");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMonitors();
+    const id = setInterval(fetchMonitors, 15000);
+    return () => clearInterval(id);
+  }, [fetchMonitors]);
 
   const upCount = monitors.filter(m => m.status === "up").length;
   const downCount = monitors.filter(m => m.status === "down").length;
@@ -28,13 +61,26 @@ export function UptimeKumaPanel() {
           <h2 className="text-2xl font-bold text-foreground">Uptime Kuma</h2>
           <p className="text-sm text-muted-foreground mt-1">Monitor de disponibilidad de servicios</p>
         </div>
-        <a href={KUMA_URL} target="_blank" rel="noopener noreferrer">
-          <Button variant="outline" className="gap-2 text-sm">
-            <ExternalLink className="h-4 w-4" />
-            Abrir Kuma UI
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={fetchMonitors} disabled={loading} className="gap-2">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Actualizar
           </Button>
-        </a>
+          <a href={KUMA_URL} target="_blank" rel="noopener noreferrer">
+            <Button variant="outline" className="gap-2 text-sm">
+              <ExternalLink className="h-4 w-4" />
+              Abrir Kuma UI
+            </Button>
+          </a>
+        </div>
       </div>
+
+      {error && (
+        <div className="card-glow rounded-lg p-4 mb-4 border border-warning/30 bg-warning/5">
+          <p className="text-xs text-warning">{error}</p>
+          <p className="text-xs text-muted-foreground mt-1">Asegúrate de que Uptime Kuma esté corriendo: <code className="font-mono text-primary">docker ps | grep kuma</code></p>
+        </div>
+      )}
 
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -42,7 +88,7 @@ export function UptimeKumaPanel() {
           { label: "Monitores", value: monitors.length.toString(), color: "text-primary" },
           { label: "Online", value: upCount.toString(), color: "text-success" },
           { label: "Caídos", value: downCount.toString(), color: downCount > 0 ? "text-destructive" : "text-success" },
-          { label: "Uptime Global", value: "99.97%", color: "text-success" },
+          { label: "Uptime Global", value: upCount > 0 ? `${Math.round((upCount / monitors.length) * 100)}%` : "—", color: "text-success" },
         ].map((s) => (
           <div key={s.label} className="card-glow rounded-lg p-4 text-center">
             <p className={`text-xl font-bold font-mono ${s.color}`}>{s.value}</p>
@@ -98,8 +144,7 @@ export function UptimeKumaPanel() {
               <span className="text-xs text-muted-foreground w-28 shrink-0 truncate">{m.name}</span>
               <div className="flex-1 flex gap-[2px]">
                 {Array.from({ length: 48 }, (_, i) => {
-                  // Simulate some heartbeat data - mostly up with rare downs
-                  const isDown = m.status === "down" || (Math.random() > 0.98);
+                  const isDown = m.status === "down";
                   return (
                     <div
                       key={i}
