@@ -1346,7 +1346,30 @@ if [ -n "$CF_TUNNEL_TOKEN" ]; then
 fi
 
 # ============================================================
-# 11. LEVANTAR TODO
+# 11. COMPILAR PANEL WEB
+# ============================================================
+log "Instalando Node.js para compilar el panel web..."
+if ! command -v node &>/dev/null || [ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 18 ]; then
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt-get install -y -qq nodejs
+fi
+success "Node.js $(node -v) instalado"
+
+log "Clonando y compilando panel web..."
+REPO_DIR="/tmp/netadmin-panel-build"
+rm -rf ${REPO_DIR}
+git clone --depth 1 https://github.com/drab10688-dot/cloud-cache-gateway.git ${REPO_DIR}
+cd ${REPO_DIR}
+npm install --silent
+npm run build
+
+log "Desplegando panel web..."
+cp -r ${REPO_DIR}/dist/* ${NETADMIN_DIR}/web/
+rm -rf ${REPO_DIR}
+success "Panel web compilado y desplegado"
+
+# ============================================================
+# 12. LEVANTAR TODO
 # ============================================================
 log "Construyendo imágenes y levantando servicios..."
 cd ${NETADMIN_DIR}
@@ -1432,7 +1455,7 @@ case "$1" in
   down)    cd $CD && docker compose down ;;
   restart) cd $CD && docker compose restart ${2:-} ;;
   logs)    cd $CD && docker compose logs -f --tail=50 ${2:-} ;;
-  update)  cd $CD && docker compose pull && docker compose up -d ;;
+  update)  cd $CD && docker compose pull && docker compose up -d && echo "Actualizando panel web..." && REPO="/tmp/netadmin-panel-build" && rm -rf $REPO && git clone --depth 1 https://github.com/drab10688-dot/cloud-cache-gateway.git $REPO && cd $REPO && npm install --silent && npm run build && cp -r dist/* $CD/web/ && rm -rf $REPO && docker restart netadmin-nginx && echo "✓ Panel web actualizado" ;;
   ps)      cd $CD && docker compose ps ;;
   status)  netadmin-status ;;
   *)
@@ -1562,11 +1585,7 @@ echo -e "    ${YELLOW}netadmin update${NC}      — Actualizar imágenes"
 echo -e "    ${YELLOW}netadmin logs [svc]${NC}  — Ver logs"
 echo -e "    ${YELLOW}netadmin restart${NC}     — Reiniciar todo"
 echo -e "    ${YELLOW}netadmin-tunnel start${NC}— Túnel Cloudflare"
-echo ""
-echo -e "  ${CYAN}Desplegar panel:${NC}"
-echo -e "    ${YELLOW}cd /opt/netadmin && npm run build && cp -r dist/* web/${NC}"
-echo -e "    ${NC}o desde tu PC:${NC}"
-echo -e "    ${YELLOW}scp -r dist/* root@${IP_ADDR}:/opt/netadmin/web/${NC}"
+echo -e "    ${YELLOW}netadmin update${NC}      — Actualizar todo + panel web"
 echo ""
 
 # Mostrar estado
