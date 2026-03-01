@@ -7,6 +7,7 @@ import {
   Cloud,
   LayoutDashboard,
   Terminal,
+  HeartPulse,
 } from "lucide-react";
 import type { Section } from "@/pages/Index";
 
@@ -17,6 +18,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "cache", label: "Caché CDN", icon: Database },
   { id: "adguard", label: "AdGuard + Unbound", icon: Shield },
   { id: "cloudflare", label: "Cloudflare Tunnel", icon: Cloud },
+  { id: "kuma", label: "Uptime Kuma", icon: HeartPulse },
   { id: "installer", label: "Instalador", icon: Terminal },
 ];
 
@@ -33,7 +35,7 @@ export function Sidebar({ active, onNavigate }: SidebarProps) {
           <Globe className="h-7 w-7 text-primary" />
           <div>
             <h1 className="text-base font-bold text-foreground tracking-tight">NetAdmin</h1>
-            <p className="text-xs text-muted-foreground font-mono">Ubuntu Server v1.0</p>
+            <p className="text-xs text-muted-foreground font-mono">Ubuntu Server v3.0</p>
           </div>
         </div>
       </div>
