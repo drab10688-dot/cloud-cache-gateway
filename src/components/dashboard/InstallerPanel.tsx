@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Terminal, Download, Copy, CheckCircle, Server, Shield, MonitorSpeaker, Package, Gamepad2, Cloud, Activity } from "lucide-react";
+import { Terminal, Download, Copy, CheckCircle, Server, Shield, MonitorSpeaker, Package, Gamepad2, Cloud, Activity, HeartPulse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const SCRIPT_URL = "/install-netadmin.sh";
@@ -14,11 +14,12 @@ const steps = [
 ];
 
 const services = [
-  { name: "Unbound DNS", icon: Server, desc: "DNS recursivo con DNSSEC, caché de 128MB, respuesta en ~4ms" },
+  { name: "Unbound DNS", icon: Server, desc: "DNS recursivo con DNSSEC, caché agresivo, respuesta ~4ms" },
   { name: "AdGuard Home", icon: Shield, desc: "Filtrado DNS: ads, trackers, infantil, MinTIC, Coljuegos" },
-  { name: "Squid SSL Bump", icon: MonitorSpeaker, desc: "Proxy caché HTTPS para YouTube, Windows Update (50GB)" },
+  { name: "Squid SSL Bump", icon: MonitorSpeaker, desc: "Proxy caché HTTPS para YouTube, Windows Update (configurable)" },
   { name: "apt-cacher-ng", icon: Package, desc: "Caché de repositorios Ubuntu/Debian" },
-  { name: "Lancache", icon: Gamepad2, desc: "Caché de Steam, Epic Games, Windows Update (100GB)" },
+  { name: "Lancache", icon: Gamepad2, desc: "Caché de Steam, Epic Games, Windows Update (configurable)" },
+  { name: "Uptime Kuma", icon: HeartPulse, desc: "Monitoreo de uptime con alertas (Telegram, Discord, Email)" },
   { name: "Cloudflare Tunnel", icon: Cloud, desc: "Acceso remoto sin IP pública, un comando para generar link" },
   { name: "Monitor de Ping", icon: Activity, desc: "Registro de latencia y caídas de internet 24/7" },
 ];

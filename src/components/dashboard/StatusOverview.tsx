@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server } from "lucide-react";
+import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Services {
@@ -21,6 +21,7 @@ const serviceConfig = [
   { key: "apt-cacher-ng", name: "apt-cacher-ng", icon: Package },
   { key: "nginx", name: "Nginx CDN", icon: Database },
   { key: "cloudflared", name: "Cloudflare Tunnel", icon: Cloud },
+  { key: "uptime-kuma", name: "Uptime Kuma", icon: HeartPulse },
   { key: "ping_monitor", name: "Monitor de Ping", icon: Activity },
 ];
 

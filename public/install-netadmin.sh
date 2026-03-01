@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# NetAdmin v2.0 — Script de Instalación Completo
+# NetAdmin v3.0 — Script de Instalación Completo
 # Ubuntu Server VPS — Todo funcional con API y Panel Web
 # ============================================================
 # Instala y conecta:
@@ -9,6 +9,7 @@
 #   - Squid (proxy caché SSL Bump para YouTube/HTTPS)
 #   - apt-cacher-ng (caché repos Linux)
 #   - Lancache (Docker: Windows Update, Steam, Epic)
+#   - Uptime Kuma (monitoreo de servicios)
 #   - Cloudflare Tunnel (acceso sin IP pública)
 #   - Monitor de Ping (detección de caídas)
 #   - API Backend (Node.js — conecta panel con servicios)
@@ -31,9 +32,14 @@ UBUNTU_VERSION=$(lsb_release -rs)
 
 echo ""
 echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}   NetAdmin v2.0 — Instalación Completa${NC}"
+echo -e "${CYAN}   NetAdmin v3.0 — Instalación Completa${NC}"
 echo -e "${CYAN}   Ubuntu $UBUNTU_VERSION — $IP_ADDR${NC}"
 echo -e "${CYAN}══════════════════════════════════════════════════════${NC}"
+echo ""
+
+# Disco disponible
+DISK_AVAIL=$(df -BG / | awk 'NR==2 {print $4}' | tr -d 'G')
+echo -e "  ${CYAN}Disco disponible: ${GREEN}${DISK_AVAIL} GB${NC}"
 echo ""
 
 read -p "Token de Cloudflare Tunnel (Enter para omitir): " CF_TUNNEL_TOKEN
@@ -41,11 +47,37 @@ read -p "Contraseña para el panel web [admin123]: " PANEL_PASS
 PANEL_PASS=${PANEL_PASS:-admin123}
 read -p "Puerto del panel web [80]: " PANEL_PORT
 PANEL_PORT=${PANEL_PORT:-80}
+
+echo ""
+echo -e "${CYAN}  ── Configuración de caché (disco) ──${NC}"
+echo -e "  Disco disponible: ${GREEN}${DISK_AVAIL} GB${NC}"
+echo ""
+read -p "  Caché Squid (YouTube/HTTPS) en GB [50]: " SQUID_CACHE_GB
+SQUID_CACHE_GB=${SQUID_CACHE_GB:-50}
+read -p "  Caché Lancache (Steam/Windows) en GB [100]: " LANCACHE_CACHE_GB
+LANCACHE_CACHE_GB=${LANCACHE_CACHE_GB:-100}
+read -p "  Caché Nginx CDN (general) en GB [50]: " NGINX_CACHE_GB
+NGINX_CACHE_GB=${NGINX_CACHE_GB:-50}
+read -p "  Caché RAM Squid en MB [512]: " SQUID_CACHE_MEM
+SQUID_CACHE_MEM=${SQUID_CACHE_MEM:-512}
+read -p "  Caché RAM Lancache en GB [2]: " LANCACHE_CACHE_MEM
+LANCACHE_CACHE_MEM=${LANCACHE_CACHE_MEM:-2}
+
+TOTAL_CACHE=$((SQUID_CACHE_GB + LANCACHE_CACHE_GB + NGINX_CACHE_GB + 5))
+echo ""
+if [ "$TOTAL_CACHE" -gt "$DISK_AVAIL" ]; then
+  warn "¡La caché total (${TOTAL_CACHE}GB) supera el disco disponible (${DISK_AVAIL}GB)!"
+  read -p "  ¿Continuar de todos modos? (s/n) [n]: " CONT
+  [ "${CONT,,}" != "s" ] && error "Instalación cancelada. Ajusta los tamaños de caché."
+fi
+
 ADGUARD_PORT=3000
 API_PORT=4000
+KUMA_PORT=3001
 
 echo ""
 log "Iniciando instalación de todos los servicios..."
+echo -e "  Caché total planificada: ${CYAN}${TOTAL_CACHE} GB${NC}"
 echo ""
 
 # ============================================================
@@ -146,7 +178,8 @@ openssl req -new -newkey rsa:2048 -sha256 -days 3650 -nodes -x509 \
 chown -R proxy:proxy /var/spool/squid/ssl_db 2>/dev/null || true
 mkdir -p /var/cache/squid && chown proxy:proxy /var/cache/squid
 
-cat > /etc/squid/squid.conf << 'SQUID_CONF'
+SQUID_CACHE_MB=$((SQUID_CACHE_GB * 1000))
+cat > /etc/squid/squid.conf << SQUID_CONF
 http_port 3128
 http_port 3129 intercept
 https_port 3130 intercept ssl-bump cert=/etc/squid/ssl_cert/netadmin-ca.pem generate-host-certificates=on dynamic_cert_mem_cache_size=16MB
@@ -158,9 +191,9 @@ ssl_bump peek step1
 ssl_bump bump cacheable_ssl
 ssl_bump splice all
 sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/spool/squid/ssl_db -M 64MB
-cache_dir ufs /var/cache/squid 50000 16 256
+cache_dir ufs /var/cache/squid ${SQUID_CACHE_MB} 16 256
 maximum_object_size 4 GB
-cache_mem 512 MB
+cache_mem ${SQUID_CACHE_MEM} MB
 maximum_object_size_in_memory 128 MB
 refresh_pattern -i \.googlevideo\.com\/videoplayback 43200 90% 86400 override-expire override-lastmod reload-into-ims ignore-reload ignore-no-store ignore-private
 refresh_pattern -i ytimg\.com 43200 90% 86400 override-expire
@@ -216,8 +249,8 @@ services:
     image: lancachenet/monolithic:latest
     container_name: lancache
     environment:
-      - CACHE_MEM_SIZE=2g
-      - CACHE_DISK_SIZE=100g
+      - CACHE_MEM_SIZE=${LANCACHE_CACHE_MEM}g
+      - CACHE_DISK_SIZE=${LANCACHE_CACHE_GB}g
       - CACHE_MAX_AGE=30d
     volumes:
       - /var/cache/lancache/data:/data/cache
@@ -228,6 +261,28 @@ services:
 LANCACHE_YML
 cd /opt/lancache && docker-compose up -d
 success "Lancache → puerto 8880 (Windows Update, Steam, Epic)"
+
+# ============================================================
+# 6b. UPTIME KUMA (Docker)
+# ============================================================
+log "Instalando Uptime Kuma..."
+mkdir -p /opt/uptime-kuma
+
+cat > /opt/uptime-kuma/docker-compose.yml << KUMA_YML
+version: '3'
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    volumes:
+      - /opt/uptime-kuma/data:/app/data
+    ports:
+      - "${KUMA_PORT}:3001"
+    restart: unless-stopped
+KUMA_YML
+
+cd /opt/uptime-kuma && docker-compose up -d
+success "Uptime Kuma → puerto $KUMA_PORT"
 
 # ============================================================
 # 7. CLOUDFLARE TUNNEL
@@ -398,6 +453,7 @@ app.get('/api/services', (req, res) => {
     ping_monitor: checkService('netadmin-ping'),
     lancache: checkDocker('lancache'),
     'lancache-dns': checkDocker('lancache-dns'),
+    'uptime-kuma': checkDocker('uptime-kuma'),
     cloudflared: checkService('cloudflared') ||
       (fs.existsSync('/tmp/cloudflared.pid') && (() => {
         try { process.kill(parseInt(fs.readFileSync('/tmp/cloudflared.pid', 'utf8')), 0); return true; } catch { return false; }
@@ -653,10 +709,21 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 30s;
     }
+
+    # Proxy a Uptime Kuma
+    location /kuma/ {
+        proxy_pass http://127.0.0.1:${KUMA_PORT}/;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
 }
 
 # CDN Cache (puerto 8888)
-proxy_cache_path /var/cache/nginx/cdn levels=1:2 keys_zone=cdn_cache:200m max_size=50g inactive=30d use_temp_path=off;
+NGINX_CACHE_MB=$((NGINX_CACHE_GB * 1000))
+proxy_cache_path /var/cache/nginx/cdn levels=1:2 keys_zone=cdn_cache:200m max_size=${NGINX_CACHE_GB}g inactive=30d use_temp_path=off;
 server {
     listen 8888;
     server_name _;
@@ -716,7 +783,7 @@ cs "nginx" "Nginx (Panel + CDN)"
 cs "netadmin-api" "API Backend"
 cs "netadmin-ping" "Monitor de Ping"
 echo ""
-for c in lancache lancache-dns; do
+for c in lancache lancache-dns uptime-kuma; do
   docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${c}$" && echo -e "  ${G}●${N} $c (Docker)" || echo -e "  ${R}●${N} $c ${R}(detenido)${N}"
 done
 echo ""
@@ -753,6 +820,7 @@ ufw allow 3128/tcp                     # Squid
 ufw allow 3142/tcp                     # apt-cacher-ng
 ufw allow 8880/tcp                     # Lancache
 ufw allow 8888/tcp                     # Nginx CDN
+ufw allow $KUMA_PORT/tcp               # Uptime Kuma
 echo "y" | ufw enable
 success "Firewall configurado"
 
@@ -761,19 +829,21 @@ success "Firewall configurado"
 # ============================================================
 echo ""
 echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}   ¡INSTALACIÓN COMPLETADA — NetAdmin v2.0!${NC}"
+echo -e "${GREEN}   ¡INSTALACIÓN COMPLETADA — NetAdmin v3.0!${NC}"
 echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
 echo ""
 echo -e "  ${CYAN}Panel Web:${NC}        http://${IP_ADDR}:${PANEL_PORT}"
 echo -e "  ${CYAN}API Backend:${NC}      http://${IP_ADDR}:${API_PORT}"
 echo -e "  ${CYAN}AdGuard Home:${NC}     http://${IP_ADDR}:${ADGUARD_PORT}"
+echo -e "  ${CYAN}Uptime Kuma:${NC}      http://${IP_ADDR}:${KUMA_PORT}"
 echo -e "  ${CYAN}Contraseña panel:${NC} ${YELLOW}${PANEL_PASS}${NC}"
 echo ""
-echo -e "  ${CYAN}Servicios de caché:${NC}"
-echo -e "    Squid (YouTube):   ${IP_ADDR}:3128"
-echo -e "    apt-cacher-ng:     ${IP_ADDR}:3142"
-echo -e "    Lancache:          ${IP_ADDR}:8880"
-echo -e "    Nginx CDN:         ${IP_ADDR}:8888"
+echo -e "  ${CYAN}Caché configurada:${NC}"
+echo -e "    Squid (YouTube):   ${GREEN}${SQUID_CACHE_GB} GB${NC} (RAM: ${SQUID_CACHE_MEM} MB) → ${IP_ADDR}:3128"
+echo -e "    Lancache:          ${GREEN}${LANCACHE_CACHE_GB} GB${NC} (RAM: ${LANCACHE_CACHE_MEM} GB) → ${IP_ADDR}:8880"
+echo -e "    Nginx CDN:         ${GREEN}${NGINX_CACHE_GB} GB${NC} → ${IP_ADDR}:8888"
+echo -e "    apt-cacher-ng:     sin límite → ${IP_ADDR}:3142"
+echo -e "    Total:             ${GREEN}$((SQUID_CACHE_GB + LANCACHE_CACHE_GB + NGINX_CACHE_GB)) GB${NC}"
 echo ""
 echo -e "  ${CYAN}Comandos:${NC}"
 echo -e "    ${YELLOW}netadmin-status${NC}          — Estado de todo"

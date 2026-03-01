@@ -7,10 +7,11 @@ import { CacheStats } from "@/components/dashboard/CacheStats";
 import { AdGuardPanel } from "@/components/dashboard/AdGuardPanel";
 import { CloudflarePanel } from "@/components/dashboard/CloudflarePanel";
 import { InstallerPanel } from "@/components/dashboard/InstallerPanel";
+import { UptimeKumaPanel } from "@/components/dashboard/UptimeKumaPanel";
 import { LoginScreen } from "@/components/dashboard/LoginScreen";
 import { isAuthenticated } from "@/lib/api";
 
-export type Section = "overview" | "ping" | "dns" | "cache" | "adguard" | "cloudflare" | "installer";
+export type Section = "overview" | "ping" | "dns" | "cache" | "adguard" | "cloudflare" | "kuma" | "installer";
 
 const Index = () => {
   const [loggedIn, setLoggedIn] = useState(isAuthenticated());
@@ -28,6 +29,7 @@ const Index = () => {
       case "cache": return <CacheStats />;
       case "adguard": return <AdGuardPanel />;
       case "cloudflare": return <CloudflarePanel />;
+      case "kuma": return <UptimeKumaPanel />;
       case "installer": return <InstallerPanel />;
     }
   };
