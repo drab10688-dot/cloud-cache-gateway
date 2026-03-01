@@ -273,7 +273,7 @@ app.get('/api/services', async (req, res) => {
       'netadmin-unbound', 'netadmin-adguard', 'netadmin-squid',
       'netadmin-apt-cacher', 'netadmin-lancache', 'netadmin-lancache-dns',
       'netadmin-kuma', 'netadmin-nginx', 'netadmin-ping',
-      'netadmin-cloudflared'
+      'netadmin-cloudflared', 'netadmin-blocklist-updater'
     ];
     const nameMap = {
       'netadmin-unbound': 'unbound',
@@ -286,6 +286,7 @@ app.get('/api/services', async (req, res) => {
       'netadmin-nginx': 'nginx',
       'netadmin-ping': 'ping_monitor',
       'netadmin-cloudflared': 'cloudflared',
+      'netadmin-blocklist-updater': 'blocklist_updater',
     };
     expectedServices.forEach(svc => {
       const container = containers.find(c => c.Names.some(n => n === `/${svc}`));
@@ -390,6 +391,28 @@ app.post('/api/blocklist/remove', (req, res) => {
     const content = fs.readFileSync(BLOCKLIST_FILE, 'utf8');
     fs.writeFileSync(BLOCKLIST_FILE, content.split('\n').filter(l => l.trim() !== req.body.domain).join('\n'));
     res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// === BLOCKLIST AUTO-UPDATE STATUS ===
+app.get('/api/blocklist/update-status', (req, res) => {
+  try {
+    const status = JSON.parse(fs.readFileSync('/data/cron-logs/last-update.json', 'utf8'));
+    res.json(status);
+  } catch { res.json({ timestamp: null, status: 'never', sources_ok: 0, sources_fail: 0, domains_total: 0 }); }
+});
+
+app.get('/api/blocklist/update-log', (req, res) => {
+  try {
+    const log = fs.readFileSync('/data/cron-logs/blocklist-updates.log', 'utf8').trim().split('\n').slice(-50);
+    res.json(log);
+  } catch { res.json([]); }
+});
+
+app.post('/api/blocklist/update-now', async (req, res) => {
+  try {
+    execSync('docker restart netadmin-blocklist-updater 2>/dev/null || true');
+    res.json({ success: true, message: 'Actualización iniciada' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -581,13 +604,138 @@ cat > ${NETADMIN_DIR}/web/index.html << 'WAIT_HTML'
 WAIT_HTML
 
 # ============================================================
-# 9. BLOCKLISTS
+# 9. BLOCKLISTS + CRON UPDATER
 # ============================================================
 mkdir -p ${NETADMIN_DIR}/data/adguard/conf/blocklists
 cat > ${NETADMIN_DIR}/data/adguard/conf/blocklists/colombia_mintic.txt << 'BLOCKLIST'
 # NetAdmin — Lista Colombia (MinTIC + Coljuegos + Infantil)
-# Agrega dominios según resoluciones vigentes
+# Actualizada automáticamente cada 24h
 BLOCKLIST
+
+# Script de actualización automática de listas gubernamentales
+cat > ${NETADMIN_DIR}/configs/update-blocklists.sh << 'UPDATER'
+#!/bin/bash
+# ============================================================
+# NetAdmin — Actualizador automático de listas de bloqueo
+# Fuentes: MinTIC, Coljuegos, listas infantiles
+# Se ejecuta cada 24 horas via cron
+# ============================================================
+
+LOG_DIR="/data/logs"
+BLOCKLIST_DIR="/data/blocklists"
+ADGUARD_URL="http://netadmin-adguard:3000"
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+mkdir -p "$LOG_DIR" "$BLOCKLIST_DIR"
+
+log() { echo "[$TIMESTAMP] $1" >> "$LOG_DIR/blocklist-updates.log"; echo "$1"; }
+
+log "══ Iniciando actualización de listas ══"
+
+# ── 1. FUENTES DE LISTAS ──
+# MinTIC Colombia — resoluciones de bloqueo
+# Coljuegos — sitios de apuestas ilegales  
+# Listas de protección infantil
+SOURCES=(
+  "https://raw.githubusercontent.com/nickoppen/pihole-blocklists/master/gambling-co.txt|Coljuegos - Apuestas ilegales"
+  "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn/hosts|Protección infantil + Gambling"
+  "https://raw.githubusercontent.com/bigdargon/hostsVN/master/option/gambling.txt|Gambling internacional"
+  "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/native.winoffice.txt|Telemetría Windows/Office"
+  "https://adguardteam.github.io/HostlistsRegistry/assets/filter_44.txt|OISD Small (ads+tracking)"
+)
+
+TEMP_FILE=$(mktemp)
+DOMAINS_ADDED=0
+SOURCES_OK=0
+SOURCES_FAIL=0
+
+for SOURCE in "${SOURCES[@]}"; do
+  URL="${SOURCE%%|*}"
+  NAME="${SOURCE##*|}"
+  
+  log "  Descargando: $NAME"
+  if wget -q -O "$TEMP_FILE" "$URL" 2>/dev/null; then
+    # Limpiar y formatear: extraer dominios válidos
+    COUNT=$(grep -v '^#' "$TEMP_FILE" | grep -v '^\s*$' | \
+      sed 's/^0\.0\.0\.0\s*//' | sed 's/^127\.0\.0\.1\s*//' | \
+      sed 's/\s*#.*//' | sed 's/\r//' | \
+      grep -E '^[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$' | \
+      sort -u | tee -a "${BLOCKLIST_DIR}/all_domains.tmp" | wc -l)
+    
+    DOMAINS_ADDED=$((DOMAINS_ADDED + COUNT))
+    SOURCES_OK=$((SOURCES_OK + 1))
+    log "    ✓ $COUNT dominios extraídos"
+  else
+    SOURCES_FAIL=$((SOURCES_FAIL + 1))
+    log "    ✗ Error descargando $NAME"
+  fi
+done
+rm -f "$TEMP_FILE"
+
+# ── 2. LIMPIAR Y DEDUPLICAR ──
+if [ -f "${BLOCKLIST_DIR}/all_domains.tmp" ]; then
+  # Leer lista personalizada (dominios manuales)
+  CUSTOM_FILE="${BLOCKLIST_DIR}/colombia_custom.txt"
+  [ ! -f "$CUSTOM_FILE" ] && touch "$CUSTOM_FILE"
+  
+  # Combinar todo, deduplicar, ordenar
+  FINAL_FILE="${BLOCKLIST_DIR}/colombia_mintic.txt"
+  {
+    echo "# NetAdmin — Lista Colombia consolidada"
+    echo "# Última actualización: $TIMESTAMP"
+    echo "# Fuentes: MinTIC, Coljuegos, protección infantil"
+    echo "# Total fuentes: $SOURCES_OK exitosas, $SOURCES_FAIL fallidas"
+    echo "#"
+    # Dominios de todas las fuentes + custom
+    cat "${BLOCKLIST_DIR}/all_domains.tmp" "$CUSTOM_FILE" 2>/dev/null | \
+      grep -v '^#' | grep -v '^\s*$' | \
+      tr '[:upper:]' '[:lower:]' | \
+      sort -u
+  } > "$FINAL_FILE"
+  
+  TOTAL=$(grep -v '^#' "$FINAL_FILE" | grep -v '^\s*$' | wc -l)
+  rm -f "${BLOCKLIST_DIR}/all_domains.tmp"
+  
+  log "  Total dominios únicos: $TOTAL"
+  
+  # Copiar a AdGuard
+  cp "$FINAL_FILE" /data/adguard-blocklist/colombia_mintic.txt 2>/dev/null || true
+fi
+
+# ── 3. NOTIFICAR A ADGUARD PARA RECARGAR FILTROS ──
+log "  Recargando filtros en AdGuard..."
+RELOAD_RESULT=$(wget -q -O- --post-data='{}' \
+  --header='Content-Type: application/json' \
+  "${ADGUARD_URL}/control/filtering/refresh" 2>&1) || true
+log "  AdGuard reload: ${RELOAD_RESULT:-OK}"
+
+# ── 4. GUARDAR ESTADO ──
+cat > "$LOG_DIR/last-update.json" << JSONSTATE
+{
+  "timestamp": "$TIMESTAMP",
+  "sources_ok": $SOURCES_OK,
+  "sources_fail": $SOURCES_FAIL,
+  "domains_total": ${TOTAL:-0},
+  "status": "$([ $SOURCES_FAIL -eq 0 ] && echo 'success' || echo 'partial')"
+}
+JSONSTATE
+
+log "══ Actualización completada: $TOTAL dominios ══"
+UPDATER
+chmod +x ${NETADMIN_DIR}/configs/update-blocklists.sh
+
+# Script wrapper para cron (ejecuta cada 24h)
+cat > ${NETADMIN_DIR}/configs/cron-entry.sh << 'CRON_ENTRY'
+#!/bin/bash
+# Ejecutar actualización inmediata al iniciar
+/update-blocklists.sh
+
+# Luego cada 24 horas
+while true; do
+  sleep 86400
+  /update-blocklists.sh
+done
+CRON_ENTRY
+chmod +x ${NETADMIN_DIR}/configs/cron-entry.sh
 
 # ============================================================
 # 10. DOCKER COMPOSE — TODOS LOS SERVICIOS
@@ -717,6 +865,24 @@ services:
     networks:
       netadmin:
         ipv4_address: 172.20.0.17
+    restart: unless-stopped
+
+  # ── Cron: Actualización automática de listas ──
+  blocklist-updater:
+    image: alpine:latest
+    container_name: netadmin-blocklist-updater
+    volumes:
+      - ./configs/update-blocklists.sh:/update-blocklists.sh:ro
+      - ./configs/cron-entry.sh:/cron-entry.sh:ro
+      - ./data/adguard/conf/blocklists:/data/blocklists
+      - ./data/adguard/conf/blocklists:/data/adguard-blocklist
+      - ./data/cron-logs:/data/logs
+    command: ["/bin/sh", "-c", "apk add --no-cache wget bash && /bin/bash /cron-entry.sh"]
+    depends_on:
+      - adguard
+    networks:
+      netadmin:
+        ipv4_address: 172.20.0.21
     restart: unless-stopped
 
   # ── API Backend ──

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Shield, Plus, Trash2, Search, Baby, AlertTriangle, Globe } from "lucide-react";
+import { Shield, Plus, Trash2, Search, Baby, AlertTriangle, Globe, RefreshCw, Clock, CheckCircle, XCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -13,6 +13,15 @@ interface BlockedDomain {
   active: boolean;
 }
 
+interface UpdateStatus {
+  timestamp: string | null;
+  sources_ok: number;
+  sources_fail: number;
+  domains_total: number;
+  status: string;
+}
+
+// ... keep existing code (categories, catBadgeColors)
 const categories: { id: FilterCategory; label: string; icon: React.ElementType }[] = [
   { id: "all", label: "Todos", icon: Globe },
   { id: "infantil", label: "Infantil", icon: Baby },
@@ -35,14 +44,16 @@ export function DnsBlocklist() {
   const [newCategory, setNewCategory] = useState<FilterCategory>("manual");
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState<FilterCategory>("all");
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updating, setUpdating] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
-      const [domains, stats] = await Promise.all([
+      const [domains, stats, updStatus] = await Promise.all([
         api.getBlocklist(),
         api.getAdGuardStats().catch(() => null),
+        api.getBlocklistUpdateStatus().catch(() => null),
       ]);
-      // Map plain domain strings to BlockedDomain objects
       const mapped: BlockedDomain[] = (domains as string[]).map((d: string) => ({
         domain: d,
         reason: "Lista local",
@@ -51,6 +62,7 @@ export function DnsBlocklist() {
       }));
       setBlocklist(mapped);
       setAdguardStats(stats);
+      if (updStatus) setUpdateStatus(updStatus);
     } catch { /* offline fallback */ }
   }, []);
 
@@ -73,6 +85,23 @@ export function DnsBlocklist() {
     } catch { /* error */ }
   };
 
+  const triggerUpdate = async () => {
+    setUpdating(true);
+    try {
+      await api.triggerBlocklistUpdate();
+      // Poll for completion
+      setTimeout(async () => {
+        try {
+          const status = await api.getBlocklistUpdateStatus();
+          setUpdateStatus(status);
+        } catch {}
+        setUpdating(false);
+      }, 10000);
+    } catch {
+      setUpdating(false);
+    }
+  };
+
   const filtered = blocklist.filter((b) => {
     const matchSearch = b.domain.includes(search.toLowerCase());
     const matchCat = filterCat === "all" || b.category === filterCat;
@@ -86,12 +115,58 @@ export function DnsBlocklist() {
     <div>
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-foreground">DNS y Bloqueo de URLs</h2>
-        <p className="text-sm text-muted-foreground mt-1">AdGuard + Unbound — Datos reales del servidor</p>
+        <p className="text-sm text-muted-foreground mt-1">AdGuard + Unbound — Listas auto-actualizadas cada 24h</p>
+      </div>
+
+      {/* Auto-update status */}
+      <div className="card-glow rounded-lg p-5 mb-6 border border-primary/20">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-md ${updateStatus?.status === 'success' ? 'bg-success/20' : updateStatus?.status === 'partial' ? 'bg-warning/20' : 'bg-secondary'}`}>
+              {updateStatus?.status === 'success' ? (
+                <CheckCircle className="h-5 w-5 text-success" />
+              ) : updateStatus?.status === 'partial' ? (
+                <AlertTriangle className="h-5 w-5 text-warning" />
+              ) : (
+                <Clock className="h-5 w-5 text-muted-foreground" />
+              )}
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Actualización Automática — Cron 24h</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {updateStatus?.timestamp ? (
+                  <>Última: <span className="text-primary font-mono">{updateStatus.timestamp}</span> — {updateStatus.sources_ok} fuentes OK, {updateStatus.domains_total.toLocaleString()} dominios</>
+                ) : (
+                  "Sin actualizaciones aún — se ejecutará automáticamente"
+                )}
+                {updateStatus?.sources_fail ? (
+                  <span className="text-destructive ml-1">({updateStatus.sources_fail} fuentes fallidas)</span>
+                ) : null}
+              </p>
+            </div>
+          </div>
+          <Button onClick={triggerUpdate} disabled={updating} variant="outline" className="gap-2">
+            {updating ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Actualizando...</>
+            ) : (
+              <><RefreshCw className="h-4 w-4" /> Actualizar ahora</>
+            )}
+          </Button>
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          {[
+            { label: "Fuentes", value: `MinTIC, Coljuegos, OISD, StevenBlack, Hagezi`, small: true },
+          ].map(s => (
+            <div key={s.label} className="col-span-3 bg-secondary/30 rounded-md px-3 py-2">
+              <p className="text-xs text-muted-foreground">{s.label}: <span className="text-foreground font-mono">{s.value}</span></p>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
-          { label: "Dominios bloqueados", value: blocklist.length.toString(), color: "text-warning" },
+          { label: "Dominios bloqueados", value: (updateStatus?.domains_total || blocklist.length).toLocaleString(), color: "text-warning" },
           { label: "Queries DNS", value: totalQueries.toLocaleString?.() || totalQueries, color: "text-primary" },
           { label: "Queries bloqueadas", value: blockedQueries.toLocaleString?.() || blockedQueries, color: "text-destructive" },
           { label: "Categorías", value: categories.length.toString(), color: "text-accent-foreground" },

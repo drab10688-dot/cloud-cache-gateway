@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse } from "lucide-react";
+import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Services {
@@ -23,6 +23,7 @@ const serviceConfig = [
   { key: "cloudflared", name: "Cloudflare Tunnel", icon: Cloud },
   { key: "uptime-kuma", name: "Uptime Kuma", icon: HeartPulse },
   { key: "ping_monitor", name: "Monitor de Ping", icon: Activity },
+  { key: "blocklist_updater", name: "Cron Listas (24h)", icon: RefreshCw },
 ];
 
 export function StatusOverview() {
