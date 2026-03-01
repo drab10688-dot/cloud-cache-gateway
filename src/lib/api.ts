@@ -81,6 +81,9 @@ export const api = {
   getCacheApt: () => apiFetch('/cache/apt'),
   getCacheNginx: () => apiFetch('/cache/nginx'),
 
+  // Kuma
+  getKumaMonitors: () => apiFetch('/kuma/monitors'),
+
   // Tunnel
   getTunnelStatus: () => apiFetch('/tunnel/status'),
   startTunnel: (token?: string) =>
