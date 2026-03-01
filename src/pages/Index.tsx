@@ -7,11 +7,18 @@ import { CacheStats } from "@/components/dashboard/CacheStats";
 import { AdGuardPanel } from "@/components/dashboard/AdGuardPanel";
 import { CloudflarePanel } from "@/components/dashboard/CloudflarePanel";
 import { InstallerPanel } from "@/components/dashboard/InstallerPanel";
+import { LoginScreen } from "@/components/dashboard/LoginScreen";
+import { isAuthenticated } from "@/lib/api";
 
 export type Section = "overview" | "ping" | "dns" | "cache" | "adguard" | "cloudflare" | "installer";
 
 const Index = () => {
+  const [loggedIn, setLoggedIn] = useState(isAuthenticated());
   const [activeSection, setActiveSection] = useState<Section>("overview");
+
+  if (!loggedIn) {
+    return <LoginScreen onLogin={() => setLoggedIn(true)} />;
+  }
 
   const renderSection = () => {
     switch (activeSection) {
