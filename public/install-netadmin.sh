@@ -26,8 +26,84 @@ error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 [ "$EUID" -ne 0 ] && error "Ejecuta como root: sudo bash install.sh"
 
-# ── Modo desinstalar ──
+# ── Mostrar versiones compatibles ──
+echo ""
+echo -e "${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║  Versiones de Ubuntu compatibles:                    ║${NC}"
+echo -e "${CYAN}║  ✓ Ubuntu 24.04 LTS (Noble)   — Recomendada         ║${NC}"
+echo -e "${CYAN}║  ✓ Ubuntu 22.04 LTS (Jammy)   — Compatible          ║${NC}"
+echo -e "${CYAN}║  ✓ Ubuntu 20.04 LTS (Focal)   — Compatible (básico) ║${NC}"
+echo -e "${CYAN}║  ✗ Ubuntu 18.04 o inferior    — No soportado         ║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+# ── Detectar si ya está instalado ──
+if [ -d "/opt/netadmin" ] && [ -f "/opt/netadmin/docker-compose.yml" ]; then
+  RUNNING=$(docker compose -f /opt/netadmin/docker-compose.yml ps --status running -q 2>/dev/null | wc -l)
+  echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
+  echo -e "${GREEN}  NetAdmin ya está instalado — ${RUNNING} contenedores activos${NC}"
+  echo -e "${GREEN}══════════════════════════════════════════════════════${NC}"
+  echo ""
+  echo "  ¿Qué deseas hacer?"
+  echo ""
+  echo "    1) Reinstalar (elimina todo y vuelve a instalar)"
+  echo "    2) Desinstalar completamente"
+  echo "    3) Cancelar"
+  echo ""
+  read -p "  Opción [3]: " OPTION
+  OPTION=${OPTION:-3}
+
+  if [ "$OPTION" = "2" ]; then
+    echo ""
+    warn "Se eliminarán TODOS los contenedores, datos y configuraciones."
+    read -p "  ¿Confirmar desinstalación? (s/n) [n]: " CONFIRM
+    if [ "${CONFIRM,,}" != "s" ]; then
+      echo "Cancelado."
+      exit 0
+    fi
+
+    log "Deteniendo y eliminando contenedores..."
+    cd /opt/netadmin 2>/dev/null && docker compose down --rmi all --volumes --remove-orphans 2>/dev/null || true
+
+    log "Eliminando directorio /opt/netadmin..."
+    rm -rf /opt/netadmin
+
+    log "Eliminando comandos netadmin..."
+    rm -f /usr/local/bin/netadmin /usr/local/bin/netadmin-tunnel
+
+    log "Restaurando systemd-resolved..."
+    systemctl enable systemd-resolved 2>/dev/null || true
+    systemctl start systemd-resolved 2>/dev/null || true
+
+    read -p "  ¿Desinstalar Docker también? (s/n) [n]: " REMOVE_DOCKER
+    if [ "${REMOVE_DOCKER,,}" = "s" ]; then
+      log "Desinstalando Docker..."
+      apt-get purge -y docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin docker-ce-rootless-extras docker-model-plugin 2>/dev/null || true
+      apt-get autoremove -y 2>/dev/null || true
+      rm -rf /var/lib/docker /var/lib/containerd
+      success "Docker desinstalado"
+    fi
+
+    success "NetAdmin desinstalado completamente"
+    echo ""
+    exit 0
+
+  elif [ "$OPTION" = "1" ]; then
+    log "Reinstalando NetAdmin..."
+    cd /opt/netadmin && docker compose down --rmi all --volumes --remove-orphans 2>/dev/null || true
+    rm -rf /opt/netadmin
+  else
+    echo "Cancelado."
+    exit 0
+  fi
+fi
+
+# ── Modo desinstalar por flag ──
 if [ "$1" = "--uninstall" ] || [ "$1" = "uninstall" ]; then
+  if [ ! -d "/opt/netadmin" ]; then
+    warn "NetAdmin no está instalado en este servidor."
+    exit 0
+  fi
   echo ""
   echo -e "${RED}══════════════════════════════════════════════════════${NC}"
   echo -e "${RED}   NetAdmin — DESINSTALACIÓN COMPLETA${NC}"
