@@ -618,7 +618,7 @@ app.get('/api/tunnel/status', async (req, res) => {
     const cf = containers.find(c => c.Names.some(n => n === '/netadmin-cloudflared'));
     const active = cf ? cf.State === 'running' : false;
     let url = '';
-    try { url = fs.readFileSync('/data/tunnel-url.txt', 'utf8').trim(); } catch {}
+    try { url = fs.readFileSync('/data/tunnel/tunnel-url.txt', 'utf8').trim(); } catch {}
     res.json({ active, url });
   } catch { res.json({ active: false, url: '' }); }
 });
@@ -632,10 +632,10 @@ app.post('/api/tunnel/start', async (req, res) => {
     // Try to get URL from container logs
     try {
       const logs = execSync('docker logs netadmin-cloudflared 2>&1 | grep -oP "https://[a-z0-9-]+\\.trycloudflare\\.com" | tail -1').toString().trim();
-      if (logs) fs.writeFileSync('/data/tunnel-url.txt', logs);
+      if (logs) fs.writeFileSync('/data/tunnel/tunnel-url.txt', logs);
     } catch {}
     let url = '';
-    try { url = fs.readFileSync('/data/tunnel-url.txt', 'utf8').trim(); } catch {}
+    try { url = fs.readFileSync('/data/tunnel/tunnel-url.txt', 'utf8').trim(); } catch {}
     res.json({ success: true, url });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -643,9 +643,44 @@ app.post('/api/tunnel/start', async (req, res) => {
 app.post('/api/tunnel/stop', async (req, res) => {
   try {
     execSync('docker stop netadmin-cloudflared 2>/dev/null || true');
-    try { fs.unlinkSync('/data/tunnel-url.txt'); } catch {}
+    try { fs.unlinkSync('/data/tunnel/tunnel-url.txt'); } catch {}
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// === KUMA MONITORS ===
+app.get('/api/kuma/monitors', async (req, res) => {
+  try {
+    const containers = await docker.listContainers({ all: true });
+    const kuma = containers.find(c => c.Names.some(n => n === '/netadmin-kuma'));
+    if (!kuma || kuma.State !== 'running') {
+      return res.json([]);
+    }
+    // Try to get monitors from Kuma API
+    try {
+      const r = await fetch('http://netadmin-kuma:3001/api/status-page/heartbeat/default');
+      const data = await r.json();
+      if (data.heartbeatList) {
+        const monitors = Object.entries(data.heartbeatList).map(([id, beats]) => {
+          const last = beats[beats.length - 1] || {};
+          return {
+            id: parseInt(id),
+            name: last.name || `Monitor ${id}`,
+            type: last.type || 'unknown',
+            target: last.url || last.hostname || '',
+            status: last.status === 1 ? 'up' : 'down',
+            uptime: '—',
+            ping: last.ping ? `${last.ping}ms` : '—',
+          };
+        });
+        return res.json(monitors);
+      }
+    } catch {}
+    // Fallback: return basic service status
+    res.json([]);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.listen(API_PORT, '0.0.0.0', () => {
@@ -1013,6 +1048,8 @@ services:
     container_name: netadmin-kuma
     volumes:
       - ./data/kuma:/app/data
+    ports:
+      - "3001:3001"
     networks:
       netadmin:
         ipv4_address: 172.20.0.16
@@ -1068,7 +1105,9 @@ services:
       - ./data/nginx-cache:/data/nginx-cache:ro
       - ./data/ping-logs:/data/ping-logs
       - ./data/adguard/conf:/data/adguard/conf
-      - ./logs:/data/cron-logs:ro
+      - ./data/squid-logs:/data/squid-logs:ro
+      - ./data/cron-logs:/data/cron-logs:ro
+      - ./data:/data/tunnel:rw
       - ${NETADMIN_DIR}:/host-data:ro
     depends_on:
       - adguard
@@ -1235,6 +1274,7 @@ ufw default deny incoming && ufw default allow outgoing
 ufw allow ssh
 ufw allow 53/tcp && ufw allow 53/udp
 ufw allow ${PANEL_PORT}/tcp
+ufw allow 3001/tcp
 ufw allow 3128/tcp
 ufw allow 3142/tcp
 ufw allow 8880/tcp
@@ -1254,14 +1294,36 @@ echo -e "  ${CYAN}Todo corre en:${NC} /opt/netadmin/docker-compose.yml"
 echo ""
 echo -e "  ${CYAN}Panel Web:${NC}        http://${IP_ADDR}:${PANEL_PORT}"
 echo -e "  ${CYAN}AdGuard Home:${NC}     http://${IP_ADDR}:3000"
-echo -e "  ${CYAN}Uptime Kuma:${NC}      http://${IP_ADDR}:${PANEL_PORT}/kuma/"
+echo -e "  ${CYAN}Uptime Kuma:${NC}      http://${IP_ADDR}:3001"
 echo -e "  ${CYAN}Contraseña:${NC}       ${YELLOW}${PANEL_PASS}${NC}"
 echo ""
 echo -e "  ${CYAN}Caché configurada:${NC}"
-echo -e "    Squid (YouTube):   ${GREEN}${SQUID_CACHE_GB} GB${NC} (RAM: ${SQUID_CACHE_MEM} MB)"
+echo -e "    Squid (Video):     ${GREEN}${SQUID_CACHE_GB} GB${NC} (RAM: ${SQUID_CACHE_MEM} MB)"
 echo -e "    Lancache:          ${GREEN}${LANCACHE_CACHE_GB} GB${NC} (RAM: ${LANCACHE_CACHE_MEM} GB)"
 echo -e "    Nginx CDN:         ${GREEN}${NGINX_CACHE_GB} GB${NC}"
 echo -e "    Total:             ${GREEN}$((SQUID_CACHE_GB + LANCACHE_CACHE_GB + NGINX_CACHE_GB)) GB${NC}"
+echo ""
+echo -e "${CYAN}  ┌──────────────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}  │  CONFIGURACIÓN DNS PARA TUS CLIENTES             │${NC}"
+echo -e "${CYAN}  ├──────────────────────────────────────────────────┤${NC}"
+echo -e "${CYAN}  │                                                  │${NC}"
+echo -e "${CYAN}  │  DNS Primario:   ${GREEN}${IP_ADDR}${CYAN}                      │${NC}"
+echo -e "${CYAN}  │  DNS Secundario: ${NC}8.8.8.8 (respaldo)${CYAN}              │${NC}"
+echo -e "${CYAN}  │                                                  │${NC}"
+echo -e "${CYAN}  │  ${NC}Router/MikroTik: DHCP → DNS = ${GREEN}${IP_ADDR}${CYAN}       │${NC}"
+echo -e "${CYAN}  │  ${NC}Windows: Adaptador → IPv4 → DNS = ${GREEN}${IP_ADDR}${CYAN}  │${NC}"
+echo -e "${CYAN}  │  ${NC}Android/iOS: WiFi → DNS = ${GREEN}${IP_ADDR}${CYAN}          │${NC}"
+echo -e "${CYAN}  │                                                  │${NC}"
+echo -e "${CYAN}  │  ${YELLOW}Con solo el DNS ya funciona:${CYAN}                    │${NC}"
+echo -e "${CYAN}  │  ${NC}✓ Bloqueo de ads y trackers${CYAN}                    │${NC}"
+echo -e "${CYAN}  │  ${NC}✓ Filtros MinTIC / Coljuegos${CYAN}                   │${NC}"
+echo -e "${CYAN}  │  ${NC}✓ Caché de video (YouTube) por DNS${CYAN}             │${NC}"
+echo -e "${CYAN}  │  ${NC}✓ Caché de juegos (Steam, Windows Update)${CYAN}      │${NC}"
+echo -e "${CYAN}  │                                                  │${NC}"
+echo -e "${CYAN}  │  ${YELLOW}Opcional (caché HTTPS avanzada):${CYAN}                │${NC}"
+echo -e "${CYAN}  │  ${NC}Proxy: ${GREEN}${IP_ADDR}:3128${CYAN}                         │${NC}"
+echo -e "${CYAN}  │  ${NC}Cert:  /opt/netadmin/certs/netadmin-ca.pem${CYAN}     │${NC}"
+echo -e "${CYAN}  └──────────────────────────────────────────────────┘${NC}"
 echo ""
 echo -e "  ${CYAN}Gestión:${NC}"
 echo -e "    ${YELLOW}netadmin status${NC}      — Estado de todo"
@@ -1272,12 +1334,9 @@ echo -e "    ${YELLOW}netadmin restart${NC}     — Reiniciar todo"
 echo -e "    ${YELLOW}netadmin-tunnel start${NC}— Túnel Cloudflare"
 echo ""
 echo -e "  ${CYAN}Desplegar panel:${NC}"
+echo -e "    ${YELLOW}cd /opt/netadmin && npm run build && cp -r dist/* web/${NC}"
+echo -e "    ${NC}o desde tu PC:${NC}"
 echo -e "    ${YELLOW}scp -r dist/* root@${IP_ADDR}:/opt/netadmin/web/${NC}"
-echo ""
-echo -e "  ${CYAN}DNS:${NC}   ${GREEN}${IP_ADDR}${NC}"
-echo -e "  ${CYAN}Proxy:${NC} ${GREEN}${IP_ADDR}:3128${NC}"
-echo ""
-echo -e "  ${YELLOW}⚠ Cert SSL Bump:${NC} /opt/netadmin/certs/netadmin-ca.pem"
 echo ""
 
 # Mostrar estado
