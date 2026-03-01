@@ -10,6 +10,7 @@ import {
   Box,
   Globe,
   Zap,
+  Router,
 } from "lucide-react";
 import type { Section } from "@/pages/Index";
 import logoImg from "@/assets/logo.png";
@@ -18,6 +19,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Dashboard", icon: LayoutDashboard },
   { id: "docker", label: "Contenedores", icon: Box },
   { id: "dnsconfig", label: "Config DNS", icon: Globe },
+  { id: "mikrotik", label: "MikroTik", icon: Router },
   { id: "network", label: "QUIC / Video", icon: Zap },
   { id: "ping", label: "Monitor Ping", icon: Activity },
   { id: "dns", label: "DNS / Bloqueo", icon: ShieldCheck },
