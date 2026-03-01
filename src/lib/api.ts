@@ -71,6 +71,9 @@ export const api = {
     apiFetch('/blocklist/add', { method: 'POST', body: JSON.stringify({ domain }) }),
   removeFromBlocklist: (domain: string) =>
     apiFetch('/blocklist/remove', { method: 'POST', body: JSON.stringify({ domain }) }),
+  getBlocklistUpdateStatus: () => apiFetch('/blocklist/update-status'),
+  getBlocklistUpdateLog: () => apiFetch('/blocklist/update-log'),
+  triggerBlocklistUpdate: () => apiFetch('/blocklist/update-now', { method: 'POST' }),
 
   // Cache
   getCacheSquid: () => apiFetch('/cache/squid'),
