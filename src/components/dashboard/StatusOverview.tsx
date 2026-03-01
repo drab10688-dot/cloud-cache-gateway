@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse, RefreshCw, Copy, CheckCircle, Info } from "lucide-react";
+import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse, RefreshCw, Copy, CheckCircle, Info, ExternalLink } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Services {
@@ -13,17 +13,19 @@ interface SystemInfo {
   cpu: number;
 }
 
+const serverIpGlobal = typeof window !== "undefined" ? window.location.hostname : "localhost";
+
 const serviceConfig = [
-  { key: "adguard", name: "AdGuard Home", icon: Shield },
-  { key: "unbound", name: "Unbound DNS", icon: Globe },
-  { key: "squid", name: "Squid Proxy (YouTube)", icon: MonitorSpeaker },
-  { key: "lancache", name: "Lancache (Steam/Windows)", icon: Gamepad2 },
-  { key: "apt-cacher-ng", name: "apt-cacher-ng", icon: Package },
-  { key: "nginx", name: "Nginx CDN", icon: Database },
-  { key: "cloudflared", name: "Cloudflare Tunnel", icon: Cloud },
-  { key: "uptime-kuma", name: "Uptime Kuma", icon: HeartPulse },
-  { key: "ping_monitor", name: "Monitor de Ping", icon: Activity },
-  { key: "blocklist_updater", name: "Cron Listas (24h)", icon: RefreshCw },
+  { key: "adguard", name: "AdGuard Home", icon: Shield, port: 3000, desc: "Filtrado DNS, bloqueo de ads" },
+  { key: "unbound", name: "Unbound DNS", icon: Globe, desc: "DNS recursivo con caché" },
+  { key: "squid", name: "Squid Proxy (YouTube)", icon: MonitorSpeaker, port: 3128, desc: "Proxy caché SSL Bump" },
+  { key: "lancache", name: "Lancache (Steam/Windows)", icon: Gamepad2, desc: "Caché de juegos y updates" },
+  { key: "apt-cacher-ng", name: "apt-cacher-ng", icon: Package, port: 3142, desc: "Caché repos Linux" },
+  { key: "nginx", name: "Nginx CDN", icon: Database, desc: "Web server + CDN caché" },
+  { key: "cloudflared", name: "Cloudflare Tunnel", icon: Cloud, desc: "Acceso remoto sin IP pública" },
+  { key: "uptime-kuma", name: "Uptime Kuma", icon: HeartPulse, port: 3001, desc: "Monitoreo de servicios" },
+  { key: "ping_monitor", name: "Monitor de Ping", icon: Activity, desc: "Detección de caídas" },
+  { key: "blocklist_updater", name: "Cron Listas (24h)", icon: RefreshCw, desc: "Actualización de listas" },
 ];
 
 export function StatusOverview() {
@@ -194,8 +196,11 @@ export function StatusOverview() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {serviceConfig.map((svc) => {
           const isOnline = services[svc.key] ?? false;
+          const hasUI = !!svc.port;
+          const serviceUrl = hasUI ? `http://${serverIp}:${svc.port}` : null;
+
           return (
-            <div key={svc.key} className="card-glow rounded-lg p-5">
+            <div key={svc.key} className={`card-glow rounded-lg p-5 transition-all ${hasUI && isOnline ? "hover:border-primary/40 hover:shadow-lg cursor-pointer" : ""}`}>
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-md bg-secondary">
@@ -206,9 +211,23 @@ export function StatusOverview() {
                     <p className={`text-xs font-mono mt-0.5 ${isOnline ? "text-success" : "text-destructive"}`}>
                       {loading ? "Verificando..." : isOnline ? "Activo" : "Inactivo"}
                     </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{svc.desc}</p>
                   </div>
                 </div>
-                <div className={loading ? "status-dot-warning animate-pulse-glow" : isOnline ? "status-dot-online" : "status-dot-offline"} />
+                <div className="flex items-center gap-2">
+                  {hasUI && isOnline && serviceUrl && (
+                    <a
+                      href={serviceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 rounded-md bg-primary/10 hover:bg-primary/20 transition-colors"
+                      title={`Abrir ${svc.name}`}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5 text-primary" />
+                    </a>
+                  )}
+                  <div className={loading ? "status-dot-warning animate-pulse-glow" : isOnline ? "status-dot-online" : "status-dot-offline"} />
+                </div>
               </div>
             </div>
           );
