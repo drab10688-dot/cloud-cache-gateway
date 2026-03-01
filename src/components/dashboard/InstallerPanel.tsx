@@ -8,9 +8,10 @@ const steps = [
   { step: "1", title: "Conectarse al VPS", cmd: "ssh root@tu-servidor" },
   { step: "2", title: "Descargar el script", cmd: "wget -O install.sh https://TU-DOMINIO/install-netadmin.sh" },
   { step: "3", title: "Dar permisos", cmd: "chmod +x install.sh" },
-  { step: "4", title: "Ejecutar como root", cmd: "sudo bash install.sh" },
-  { step: "5", title: "Verificar servicios", cmd: "netadmin-status" },
-  { step: "6", title: "Activar túnel Cloudflare", cmd: "netadmin-tunnel start" },
+  { step: "4", title: "Ejecutar (instala Docker + levanta todo)", cmd: "sudo bash install.sh" },
+  { step: "5", title: "Verificar contenedores", cmd: "netadmin status" },
+  { step: "6", title: "Gestionar servicios", cmd: "netadmin logs / netadmin restart" },
+  { step: "7", title: "Activar túnel Cloudflare", cmd: "netadmin-tunnel start" },
 ];
 
 const services = [
@@ -44,7 +45,7 @@ export function InstallerPanel() {
     <div>
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-foreground">Instalador Ubuntu Server</h2>
-        <p className="text-sm text-muted-foreground mt-1">Script automatizado para VPS — Ubuntu 20.04 / 22.04 / 24.04</p>
+        <p className="text-sm text-muted-foreground mt-1">100% Docker — Ubuntu Server — Un solo comando instala todo</p>
       </div>
 
       {/* Download */}
@@ -56,7 +57,7 @@ export function InstallerPanel() {
             </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">install-netadmin.sh</h3>
-              <p className="text-xs text-muted-foreground font-mono">Script Bash completo — Instalación en un solo comando</p>
+              <p className="text-xs text-muted-foreground font-mono">Instala Docker + docker-compose.yml con todos los servicios</p>
             </div>
           </div>
           <Button onClick={downloadScript} className="gap-2" size="lg">
@@ -126,14 +127,14 @@ export function InstallerPanel() {
         </div>
 
         <div className="card-glow rounded-lg p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-3">Requisitos del VPS</h3>
+        <h3 className="text-sm font-semibold text-foreground mb-3">Requisitos del VPS</h3>
           <div className="space-y-2 text-xs text-muted-foreground">
-            <p>• Ubuntu Server 20.04, 22.04 o 24.04</p>
+            <p>• Ubuntu Server 20.04+ (o cualquier Linux con apt)</p>
             <p>• Mínimo <span className="text-primary font-mono">2 GB RAM</span> / <span className="text-primary font-mono">2 vCPU</span></p>
             <p>• <span className="text-primary font-mono">100 GB+</span> disco (para caché)</p>
             <p>• Acceso root (sudo)</p>
-            <p>• Cuenta Cloudflare (gratis) para el túnel</p>
-            <p>• Docker será instalado automáticamente</p>
+            <p>• Docker se instala automáticamente</p>
+            <p>• Gestión: <span className="text-primary font-mono">netadmin up/down/update/logs</span></p>
           </div>
         </div>
       </div>
