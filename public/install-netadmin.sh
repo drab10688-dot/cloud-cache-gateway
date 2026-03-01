@@ -65,8 +65,43 @@ if [ "$1" = "--uninstall" ] || [ "$1" = "uninstall" ]; then
   echo ""
   exit 0
 fi
+# ── Verificar compatibilidad del sistema ──
+if ! grep -qi "ubuntu" /etc/os-release; then
+  error "Este script solo es compatible con Ubuntu Server. Sistema detectado: $(. /etc/os-release && echo $PRETTY_NAME)"
+fi
 
-grep -qi "ubuntu" /etc/os-release || error "Solo para Ubuntu Server"
+UBUNTU_VER=$(lsb_release -rs 2>/dev/null || grep VERSION_ID /etc/os-release | tr -d '"' | cut -d= -f2)
+UBUNTU_MAJOR=$(echo "$UBUNTU_VER" | cut -d. -f1)
+
+if [ "$UBUNTU_MAJOR" -lt 20 ]; then
+  error "Ubuntu $UBUNTU_VER no es compatible. Se requiere Ubuntu 20.04 o superior."
+elif [ "$UBUNTU_MAJOR" -lt 22 ]; then
+  warn "Ubuntu $UBUNTU_VER: compatible pero se recomienda 22.04 o 24.04 para mejor rendimiento."
+  read -p "  ¿Continuar de todos modos? (s/n) [s]: " CONT_VER
+  [ "${CONT_VER,,}" = "n" ] && exit 0
+else
+  success "Ubuntu $UBUNTU_VER detectado — Compatible ✓"
+fi
+
+# Verificar arquitectura
+ARCH=$(uname -m)
+if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "aarch64" ]; then
+  error "Arquitectura $ARCH no soportada. Se requiere x86_64 o aarch64."
+fi
+
+# Verificar recursos mínimos
+MEM_TOTAL_MB=$(grep MemTotal /proc/meminfo | awk '{print int($2/1024)}')
+CPU_CORES=$(nproc)
+if [ "$MEM_TOTAL_MB" -lt 1800 ]; then
+  warn "RAM insuficiente: ${MEM_TOTAL_MB}MB detectados. Mínimo recomendado: 2GB."
+  read -p "  ¿Continuar de todos modos? (s/n) [n]: " CONT_MEM
+  [ "${CONT_MEM,,}" != "s" ] && error "Instalación cancelada. Se necesitan al menos 2GB de RAM."
+fi
+if [ "$CPU_CORES" -lt 2 ]; then
+  warn "CPU: $CPU_CORES núcleo(s). Se recomiendan mínimo 2 vCPU."
+fi
+
+
 
 IP_ADDR=$(hostname -I | awk '{print $1}')
 UBUNTU_VERSION=$(lsb_release -rs)
