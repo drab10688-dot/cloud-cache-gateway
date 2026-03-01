@@ -1,6 +1,5 @@
 import {
   Activity,
-  Globe,
   ShieldCheck,
   Database,
   Shield,
@@ -10,6 +9,7 @@ import {
   HeartPulse,
 } from "lucide-react";
 import type { Section } from "@/pages/Index";
+import logoImg from "@/assets/logo.png";
 
 const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Dashboard", icon: LayoutDashboard },
@@ -32,7 +32,9 @@ export function Sidebar({ active, onNavigate }: SidebarProps) {
     <aside className="fixed left-0 top-0 h-screen w-64 bg-sidebar border-r border-sidebar-border flex flex-col z-50">
       <div className="p-5 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
-          <Globe className="h-7 w-7 text-sidebar-primary" />
+          <div className="relative w-10 h-10 rounded-full overflow-hidden ring-2 ring-sidebar-primary/60 shadow-[0_0_12px_hsl(175_80%_45%/0.4)]">
+            <img src={logoImg} alt="NetAdmin Logo" className="w-full h-full object-cover" />
+          </div>
           <div>
             <h1 className="text-base font-bold text-white tracking-tight">NetAdmin</h1>
             <p className="text-xs text-sidebar-foreground font-mono">Ubuntu Server v3.0</p>
