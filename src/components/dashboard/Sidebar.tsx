@@ -11,6 +11,7 @@ import {
   Globe,
   Zap,
   Router,
+  Settings,
 } from "lucide-react";
 import type { Section } from "@/pages/Index";
 import logoImg from "@/assets/logo.png";
@@ -28,6 +29,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "cloudflare", label: "Cloudflare Tunnel", icon: Cloud },
   { id: "kuma", label: "Uptime Kuma", icon: HeartPulse },
   { id: "installer", label: "Instalador", icon: Terminal },
+  { id: "settings", label: "Configuración", icon: Settings },
 ];
 
 interface SidebarProps {
