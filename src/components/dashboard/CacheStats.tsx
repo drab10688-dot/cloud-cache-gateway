@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import { MonitorSpeaker, Package, Gamepad2, Database, Settings, RefreshCw, Loader2, Play, Globe, Zap, HardDrive, Wifi, Copy, CheckCircle, ArrowRight, Info } from "lucide-react";
+import { MonitorSpeaker, Package, Gamepad2, Database, Settings, RefreshCw, Loader2, Play, Globe, Zap, HardDrive, Wifi, Copy, CheckCircle, ArrowRight, Info, Trash2, Shield, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import { api } from "@/lib/api";
 
 interface CacheData {
@@ -10,20 +12,35 @@ interface CacheData {
   nginx: { size: string };
 }
 
+interface DiskData {
+  total: string; used: string; available: string; percent: number;
+}
+
+interface CleanupConfig {
+  enabled: boolean; threshold: number;
+}
+
 export function CacheStats() {
   const [cache, setCache] = useState<CacheData | null>(null);
+  const [disk, setDisk] = useState<DiskData | null>(null);
+  const [cleanup, setCleanup] = useState<CleanupConfig | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [purging, setPurging] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const fetchCache = useCallback(async () => {
     try {
-      const [squid, lancache, apt, nginx] = await Promise.all([
+      const [squid, lancache, apt, nginx, diskData, cleanupData] = await Promise.all([
         api.getCacheSquid(),
         api.getCacheLancache(),
         api.getCacheApt(),
         api.getCacheNginx(),
+        api.getCacheDisk().catch(() => null),
+        api.getCleanupConfig().catch(() => ({ enabled: false, threshold: 85 })),
       ]);
       setCache({ squid, lancache, apt, nginx });
+      if (diskData) setDisk(diskData);
+      if (cleanupData) setCleanup(cleanupData);
     } catch { /* offline */ }
   }, []);
 
@@ -37,6 +54,29 @@ export function CacheStats() {
     setRefreshing(true);
     await fetchCache();
     setRefreshing(false);
+  };
+
+  const handlePurge = async (service: string) => {
+    if (!confirm(`¿Eliminar caché de ${service === 'all' ? 'TODOS los servicios' : service}? Esta acción no se puede deshacer.`)) return;
+    setPurging(service);
+    try {
+      await api.purgeCache(service);
+      await fetchCache();
+    } catch {}
+    setPurging(null);
+  };
+
+  const handleCleanupToggle = async (enabled: boolean) => {
+    const threshold = cleanup?.threshold || 85;
+    setCleanup({ enabled, threshold });
+    await api.setCleanupConfig(enabled, threshold).catch(() => {});
+  };
+
+  const handleThresholdChange = async (value: number[]) => {
+    const threshold = value[0];
+    const enabled = cleanup?.enabled ?? false;
+    setCleanup({ enabled, threshold });
+    await api.setCleanupConfig(enabled, threshold).catch(() => {});
   };
 
   const copyText = (text: string, field: string) => {
@@ -255,6 +295,122 @@ export function CacheStats() {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Disk Usage & Cache Management */}
+      <div className="card-glow rounded-lg overflow-hidden mb-4 border border-warning/30">
+        <div className="bg-gradient-to-r from-warning/10 via-warning/5 to-transparent p-5 border-b border-border">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-xl bg-warning/20">
+              <HardDrive className="h-6 w-6 text-warning" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-foreground">Gestión de Disco y Caché</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">Limpia caché manualmente o configura limpieza automática</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Disk usage bar */}
+          {disk && (
+            <div>
+              <div className="flex justify-between text-xs text-muted-foreground mb-1.5">
+                <span>Uso del disco</span>
+                <span className="font-mono font-semibold">
+                  <span className={disk.percent >= 85 ? "text-destructive" : disk.percent >= 70 ? "text-warning" : "text-success"}>
+                    {disk.percent}%
+                  </span>
+                  {" "}— {disk.used} de {disk.total} (libre: {disk.available})
+                </span>
+              </div>
+              <div className="h-3 bg-secondary rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-1000 ${
+                    disk.percent >= 85 ? "bg-destructive" : disk.percent >= 70 ? "bg-warning" : "bg-success"
+                  }`}
+                  style={{ width: `${disk.percent}%` }}
+                />
+              </div>
+              {disk.percent >= 80 && (
+                <div className="flex items-center gap-2 mt-2 text-xs text-warning">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  <span>Disco casi lleno — considera limpiar caché o activar limpieza automática</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Auto-cleanup config */}
+          <div className="bg-secondary/30 rounded-lg p-4 border border-border/50">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <Shield className="h-5 w-5 text-primary" />
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Limpieza Automática</p>
+                  <p className="text-xs text-muted-foreground">Elimina archivos antiguos del caché cuando el disco supere el umbral</p>
+                </div>
+              </div>
+              <Switch
+                checked={cleanup?.enabled ?? false}
+                onCheckedChange={handleCleanupToggle}
+              />
+            </div>
+            {cleanup?.enabled && (
+              <div className="mt-3 pt-3 border-t border-border/50">
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
+                  <span>Umbral de limpieza</span>
+                  <span className="font-mono font-semibold text-foreground">{cleanup.threshold}%</span>
+                </div>
+                <Slider
+                  value={[cleanup.threshold]}
+                  onValueCommit={handleThresholdChange}
+                  min={50}
+                  max={95}
+                  step={5}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground mt-2">
+                  Cuando el disco supere {cleanup.threshold}%, se eliminan archivos de caché con más de 7 días sin acceso
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Manual purge buttons */}
+          <div>
+            <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+              <Trash2 className="h-4 w-4 text-destructive" />
+              Limpiar Caché Manualmente
+            </h4>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {[
+                { key: "squid", label: "Video Cache", size: cache?.squid.size },
+                { key: "lancache", label: "Lancache", size: cache?.lancache.size },
+                { key: "apt", label: "apt-cache", size: cache?.apt.size },
+                { key: "nginx", label: "Nginx CDN", size: cache?.nginx.size },
+                { key: "all", label: "TODO", size: null },
+              ].map((s) => (
+                <Button
+                  key={s.key}
+                  variant={s.key === "all" ? "destructive" : "outline"}
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  disabled={purging !== null}
+                  onClick={() => handlePurge(s.key)}
+                >
+                  {purging === s.key ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  {s.label}
+                  {s.size && <span className="font-mono opacity-60">({s.size})</span>}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* SSH Commands */}
