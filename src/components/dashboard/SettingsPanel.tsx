@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Lock, CheckCircle, AlertTriangle, LogOut, RefreshCw, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BrandingSettings } from "./BrandingSettings";
 import { Input } from "@/components/ui/input";
 import { api, clearToken } from "@/lib/api";
 
@@ -183,6 +184,11 @@ export function SettingsPanel() {
             </Button>
           </div>
         </div>
+      </div>
+
+      {/* Branding section - full width */}
+      <div className="mt-6">
+        <BrandingSettings />
       </div>
     </div>
   );
