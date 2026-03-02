@@ -888,6 +888,31 @@ app.get('/api/network/video-stats', (req, res) => {
   }
 });
 
+// === SYSTEM UPDATES ===
+app.post('/api/system/update-docker', (req, res) => {
+  try {
+    execSync('docker compose -f /host-data/docker-compose.yml pull 2>&1', { timeout: 300000 });
+    execSync('docker compose -f /host-data/docker-compose.yml up -d 2>&1', { timeout: 120000 });
+    res.json({ success: true, message: 'Imágenes actualizadas y contenedores reiniciados' });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/system/update-panel', (req, res) => {
+  try {
+    const cmds = [
+      'rm -rf /tmp/netadmin-panel-build',
+      'git clone --depth 1 https://github.com/drab10688-dot/cloud-cache-gateway.git /tmp/netadmin-panel-build',
+      'cd /tmp/netadmin-panel-build && npm install --silent && npm run build',
+      'cp -r /tmp/netadmin-panel-build/dist/* /host-data/web/',
+      'rm -rf /tmp/netadmin-panel-build',
+    ];
+    // Run via docker to have access to host filesystem and node
+    execSync(`docker run --rm -v /opt/netadmin:/host-data -v /tmp:/tmp node:20-alpine sh -c "${cmds.join(' && ')}"`, { timeout: 300000 });
+    execSync('docker restart netadmin-nginx 2>/dev/null || true');
+    res.json({ success: true, message: 'Panel web actualizado' });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 app.listen(API_PORT, '0.0.0.0', () => {
   console.log(`NetAdmin API v4.0 → http://0.0.0.0:${API_PORT}`);
 });

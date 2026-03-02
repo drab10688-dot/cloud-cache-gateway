@@ -117,4 +117,8 @@ export const api = {
   unblockQuic: () => apiFetch('/network/quic-unblock', { method: 'POST' }),
   getVideoStats: () => apiFetch('/network/video-stats'),
   getTcpOptimization: () => apiFetch('/network/tcp-optimization'),
+
+  // System updates
+  updateDockerImages: () => apiFetch('/system/update-docker', { method: 'POST' }),
+  updatePanel: () => apiFetch('/system/update-panel', { method: 'POST' }),
 };
