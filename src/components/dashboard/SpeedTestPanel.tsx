@@ -146,19 +146,19 @@ function SpeedGauge({ value, max, phase, progress }: { value: number; max: numbe
 
       {/* Center value */}
       <div className="absolute top-[105px] flex flex-col items-center">
-        {phase === "done" ? (
+        {phase === "done" || isRunning ? (
           <>
-            <span className="text-4xl font-bold font-mono text-foreground leading-none">{value}</span>
-            <span className="text-xs text-muted-foreground mt-1">Mbps</span>
-          </>
-        ) : isRunning ? (
-          <>
-            <span className="text-3xl font-bold font-mono text-primary leading-none animate-pulse">
-              {Math.round(progress)}%
+            <span className="text-4xl font-bold font-mono text-foreground leading-none">
+              {phase === "latency" ? Math.round(value) : value.toFixed(1)}
             </span>
-            <span className="text-[10px] text-muted-foreground mt-1 uppercase tracking-wider">
-              {phase === "latency" ? "Latencia" : phase === "download" ? "Descarga" : "Subida"}
+            <span className="text-xs text-muted-foreground mt-1">
+              {phase === "latency" ? "ms" : "Mbps"}
             </span>
+            {isRunning && (
+              <span className="text-[10px] text-muted-foreground mt-1 uppercase tracking-wider animate-pulse">
+                {phase === "latency" ? "Latencia" : phase === "download" ? "Descarga" : "Subida"}
+              </span>
+            )}
           </>
         ) : (
           <span className="text-sm text-muted-foreground">Listo</span>
@@ -196,6 +196,7 @@ function ResultCard({ icon: Icon, label, value, unit, ratingLabel, ratingColor }
 export function SpeedTestPanel() {
   const [phase, setPhase] = useState<TestPhase>("idle");
   const [progress, setProgress] = useState(0);
+  const [liveValue, setLiveValue] = useState(0);
   const [result, setResult] = useState<SpeedResult | null>(null);
   const [history, setHistory] = useState<(SpeedResult & { timestamp: Date })[]>([]);
   const abortRef = useRef<AbortController | null>(null);
@@ -206,7 +207,10 @@ export function SpeedTestPanel() {
       if (signal.aborted) throw new Error("Aborted");
       const start = performance.now();
       await fetch(`${API_BASE}/speedtest/ping?t=${Date.now()}`, { signal, cache: "no-store" });
-      pings.push(performance.now() - start);
+      const ping = performance.now() - start;
+      pings.push(ping);
+      const avg = pings.reduce((a, b) => a + b, 0) / pings.length;
+      setLiveValue(Math.round(avg * 10) / 10);
       setProgress(((i + 1) / 10) * 100);
     }
     const avg = pings.reduce((a, b) => a + b, 0) / pings.length;
@@ -223,6 +227,9 @@ export function SpeedTestPanel() {
       const res = await fetch(`${API_BASE}/speedtest/download?size=${sizes[i]}&t=${Date.now()}`, { signal, cache: "no-store" });
       const blob = await res.blob();
       totalBytes += blob.size;
+      const elapsed = (performance.now() - startTime) / 1000;
+      const currentSpeed = Math.round(((totalBytes * 8) / elapsed / 1_000_000) * 100) / 100;
+      setLiveValue(currentSpeed);
       setProgress(((i + 1) / sizes.length) * 100);
     }
     const elapsed = (performance.now() - startTime) / 1000;
@@ -239,6 +246,9 @@ export function SpeedTestPanel() {
       const data = new ArrayBuffer(sizeBytes);
       await fetch(`${API_BASE}/speedtest/upload`, { method: "POST", body: data, signal, headers: { "Content-Type": "application/octet-stream" } });
       totalBytes += sizeBytes;
+      const elapsed = (performance.now() - startTime) / 1000;
+      const currentSpeed = Math.round(((totalBytes * 8) / elapsed / 1_000_000) * 100) / 100;
+      setLiveValue(currentSpeed);
       setProgress(((i + 1) / sizes.length) * 100);
     }
     const elapsed = (performance.now() - startTime) / 1000;
@@ -250,16 +260,17 @@ export function SpeedTestPanel() {
     abortRef.current = controller;
     const signal = controller.signal;
     setResult(null);
+    setLiveValue(0);
     const partial: SpeedResult = { download: 0, upload: 0, latency: 0, jitter: 0 };
     try {
-      setPhase("latency"); setProgress(0);
+      setPhase("latency"); setProgress(0); setLiveValue(0);
       const { latency, jitter } = await measureLatency(signal);
       partial.latency = latency; partial.jitter = jitter;
 
-      setPhase("download"); setProgress(0);
+      setPhase("download"); setProgress(0); setLiveValue(0);
       partial.download = await measureDownload(signal);
 
-      setPhase("upload"); setProgress(0);
+      setPhase("upload"); setProgress(0); setLiveValue(0);
       partial.upload = await measureUpload(signal);
 
       setResult(partial);
@@ -270,8 +281,8 @@ export function SpeedTestPanel() {
     }
   }, [measureLatency, measureDownload, measureUpload]);
 
-  const cancelTest = () => { abortRef.current?.abort(); setPhase("idle"); setProgress(0); };
-  const reset = () => { setPhase("idle"); setProgress(0); setResult(null); };
+  const cancelTest = () => { abortRef.current?.abort(); setPhase("idle"); setProgress(0); setLiveValue(0); };
+  const reset = () => { setPhase("idle"); setProgress(0); setResult(null); setLiveValue(0); };
 
   const isRunning = phase !== "idle" && phase !== "done";
 
@@ -308,8 +319,8 @@ export function SpeedTestPanel() {
       <div className="card-glow rounded-2xl p-8 mb-6">
         <div className="flex flex-col items-center">
           <SpeedGauge
-            value={result?.download ?? 0}
-            max={1000}
+            value={phase === "done" ? (result?.download ?? 0) : liveValue}
+            max={phase === "latency" ? 200 : 1000}
             phase={phase}
             progress={progress}
           />
