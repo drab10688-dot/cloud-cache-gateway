@@ -288,24 +288,6 @@ export function SpeedTestPanel() {
         </div>
       )}
 
-      {/* Server info */}
-      <div className="card-glow rounded-lg p-5 mb-6">
-        <h3 className="text-sm font-semibold text-foreground mb-3">Información del servidor</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div>
-            <p className="text-xs text-muted-foreground">Servidor</p>
-            <p className="font-mono text-primary">{SERVER_IP}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Tipo de test</p>
-            <p className="font-mono text-foreground">Cliente → VPS (LAN/WAN)</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Uso</p>
-            <p className="text-xs text-muted-foreground">Verifica planes, diagnostica cuellos de botella</p>
-          </div>
-        </div>
-      </div>
 
       {/* History */}
       {history.length > 0 && (
