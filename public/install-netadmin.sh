@@ -632,6 +632,71 @@ app.get('/api/cache/nginx', (req, res) => {
   res.json({ size: getCacheSize('/data/nginx-cache') });
 });
 
+// === CACHE MANAGEMENT ===
+const getDiskUsage = () => {
+  try {
+    const df = execSync("df -h /data | tail -1").toString().trim().split(/\s+/);
+    return { total: df[1], used: df[2], available: df[3], percent: parseInt(df[4]) };
+  } catch { return { total: '?', used: '?', available: '?', percent: 0 }; }
+};
+
+app.get('/api/cache/disk', requireAuth, (req, res) => {
+  res.json(getDiskUsage());
+});
+
+app.post('/api/cache/purge', requireAuth, (req, res) => {
+  const { service } = req.body; // squid, lancache, apt, nginx, all
+  try {
+    const cmds = {
+      squid: 'rm -rf /data/squid-cache/* && docker restart netadmin-squid',
+      lancache: 'rm -rf /data/lancache-data/*',
+      apt: 'rm -rf /data/apt-cache/*',
+      nginx: 'rm -rf /data/nginx-cache/*',
+    };
+    if (service === 'all') {
+      Object.values(cmds).forEach(cmd => { try { execSync(cmd); } catch {} });
+    } else if (cmds[service]) {
+      execSync(cmds[service]);
+    } else {
+      return res.status(400).json({ error: 'Servicio inválido' });
+    }
+    res.json({ success: true, message: 'Caché limpiado: ' + service });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Auto-cleanup config file
+const CLEANUP_CONFIG = '/data/cache-cleanup.json';
+const getCleanupConfig = () => {
+  try { return JSON.parse(fs.readFileSync(CLEANUP_CONFIG, 'utf8')); }
+  catch { return { enabled: false, threshold: 85 }; }
+};
+
+app.get('/api/cache/cleanup-config', requireAuth, (req, res) => {
+  res.json(getCleanupConfig());
+});
+
+app.post('/api/cache/cleanup-config', requireAuth, (req, res) => {
+  const { enabled, threshold } = req.body;
+  const config = { enabled: !!enabled, threshold: threshold || 85 };
+  fs.writeFileSync(CLEANUP_CONFIG, JSON.stringify(config));
+  res.json({ success: true, ...config });
+});
+
+// Auto-cleanup check (runs every 5 min)
+setInterval(() => {
+  const config = getCleanupConfig();
+  if (!config.enabled) return;
+  const disk = getDiskUsage();
+  if (disk.percent >= config.threshold) {
+    console.log('[AutoCleanup] Disk at ' + disk.percent + '%, threshold ' + config.threshold + '%. Cleaning oldest cache...');
+    try {
+      execSync('find /data/squid-cache -type f -atime +7 -delete 2>/dev/null || true');
+      execSync('find /data/lancache-data -type f -atime +14 -delete 2>/dev/null || true');
+      execSync('find /data/nginx-cache -type f -atime +7 -delete 2>/dev/null || true');
+    } catch {}
+  }
+}, 5 * 60 * 1000);
+
 // === CLOUDFLARE TUNNEL ===
 const TUNNEL_URL_FILE = '/data/tunnel/tunnel-url.txt';
 
