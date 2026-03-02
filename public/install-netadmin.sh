@@ -407,7 +407,14 @@ app.use(cors());
 app.use(express.json());
 
 const API_PORT = process.env.API_PORT || 4000;
-const PANEL_PASS = process.env.PANEL_PASS || 'admin123';
+let PANEL_PASS = process.env.PANEL_PASS || 'admin123';
+const PASS_FILE = '/data/tunnel/panel-pass.txt';
+// Load saved password if exists
+try { 
+  const saved = fs.readFileSync(PASS_FILE, 'utf8').trim();
+  if (saved) PANEL_PASS = saved;
+} catch {}
+
 const ADGUARD_URL = process.env.ADGUARD_URL || 'http://adguard:3000';
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
@@ -427,6 +434,19 @@ app.post('/api/auth/login', (req, res) => {
   } else {
     res.status(401).json({ error: 'Contraseña incorrecta' });
   }
+});
+
+app.post('/api/auth/change-password', (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (currentPassword !== PANEL_PASS) {
+    return res.status(401).json({ success: false, error: 'Contraseña actual incorrecta' });
+  }
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ success: false, error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+  }
+  PANEL_PASS = newPassword;
+  try { fs.writeFileSync(PASS_FILE, newPassword); } catch {}
+  res.json({ success: true });
 });
 
 // === DOCKER SERVICE STATUS ===

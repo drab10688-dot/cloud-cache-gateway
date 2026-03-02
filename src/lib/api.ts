@@ -47,6 +47,12 @@ export const api = {
       body: JSON.stringify({ password }),
     }).then(r => r.json()),
 
+  changePassword: (currentPassword: string, newPassword: string) =>
+    apiFetch('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
+
   // Services
   getServices: () => apiFetch('/services'),
   getSystem: () => apiFetch('/system'),
