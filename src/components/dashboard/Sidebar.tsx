@@ -54,7 +54,7 @@ export function Sidebar({ active, onNavigate }: SidebarProps) {
         </div>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1">
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = active === item.id;
           return (
