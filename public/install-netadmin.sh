@@ -422,6 +422,12 @@ const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 // Parse raw body for speed test upload
 app.use('/api/speedtest/upload', express.raw({ type: 'application/octet-stream', limit: '50mb' }));
 
+const requireAuth = (req, res, next) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (token !== PANEL_PASS) return res.status(401).json({ error: 'No autorizado' });
+  next();
+};
+
 app.use((req, res, next) => {
   // Public routes (no auth required)
   if (req.path === '/api/auth/login') return next();
