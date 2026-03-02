@@ -169,25 +169,20 @@ function SpeedGauge({ value, max, phase, progress }: { value: number; max: numbe
 }
 
 /* ── Result Card ── */
-function ResultCard({ icon: Icon, label, value, unit, ratingLabel, ratingColor }: {
+function ResultCard({ icon: Icon, label, value, unit }: {
   icon: typeof Download;
   label: string;
   value: string;
   unit: string;
-  ratingLabel: string;
-  ratingColor: string;
 }) {
   return (
     <div className="card-glow rounded-xl p-5 text-center group hover:scale-[1.02] transition-transform">
       <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
         <Icon className="h-5 w-5 text-primary" />
       </div>
-      <p className={`text-3xl font-bold font-mono ${ratingColor}`}>{value}</p>
+      <p className="text-3xl font-bold font-mono text-foreground">{value}</p>
       <p className="text-xs text-muted-foreground mt-0.5">{unit}</p>
       <p className="text-[10px] font-semibold uppercase tracking-wider mt-2 text-muted-foreground">{label}</p>
-      <span className={`inline-block mt-2 text-[10px] font-bold px-2 py-0.5 rounded-full ${ratingColor} bg-current/10`}>
-        {ratingLabel}
-      </span>
     </div>
   );
 }
@@ -378,10 +373,10 @@ export function SpeedTestPanel() {
       {/* Results */}
       {result && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <ResultCard icon={Download} label="Descarga" value={`${result.download}`} unit="Mbps" ratingLabel={getSpeedRating(result.download).label} ratingColor={getSpeedRating(result.download).color} />
-          <ResultCard icon={Upload} label="Subida" value={`${result.upload}`} unit="Mbps" ratingLabel={getSpeedRating(result.upload).label} ratingColor={getSpeedRating(result.upload).color} />
-          <ResultCard icon={Clock} label="Latencia" value={`${result.latency}`} unit="ms" ratingLabel={getLatencyRating(result.latency).label} ratingColor={getLatencyRating(result.latency).color} />
-          <ResultCard icon={Wifi} label="Jitter" value={`${result.jitter}`} unit="ms" ratingLabel={getJitterRating(result.jitter).label} ratingColor={getJitterRating(result.jitter).color} />
+          <ResultCard icon={Download} label="Descarga" value={`${result.download}`} unit="Mbps" />
+          <ResultCard icon={Upload} label="Subida" value={`${result.upload}`} unit="Mbps" />
+          <ResultCard icon={Clock} label="Latencia" value={`${result.latency}`} unit="ms" />
+          <ResultCard icon={Wifi} label="Jitter" value={`${result.jitter}`} unit="ms" />
         </div>
       )}
 
