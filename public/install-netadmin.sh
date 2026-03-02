@@ -372,9 +372,9 @@ RUN CERTGEN=$(find /usr/lib/squid -name "security_file_certgen" -o -name "ssl_cr
     rm -rf /var/spool/squid/ssl_db && \
     $CERTGEN -c -s /var/spool/squid/ssl_db -M 64MB && \
     chown -R proxy:proxy /var/spool/squid/ssl_db
-RUN squid -z 2>/dev/null || true
+RUN squid -z 2>/dev/null || true; rm -f /run/squid.pid
 EXPOSE 3128 3129 3130
-CMD ["sh", "-c", "chown -R proxy:proxy /var/log/squid /var/cache/squid && squid -N -d1"]
+CMD ["sh", "-c", "chown -R proxy:proxy /var/log/squid /var/cache/squid /var/spool/squid && squid -z 2>/dev/null; rm -f /run/squid.pid && squid -N -d1"]
 DOCKERFILE
 
 # ============================================================
