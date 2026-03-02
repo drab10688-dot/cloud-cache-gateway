@@ -11,6 +11,7 @@ import {
   Globe,
   Zap,
   Router,
+  Gauge,
   Settings,
 } from "lucide-react";
 import type { Section } from "@/pages/Index";
@@ -28,6 +29,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "adguard", label: "AdGuard + Unbound", icon: Shield },
   { id: "cloudflare", label: "Cloudflare Tunnel", icon: Cloud },
   { id: "kuma", label: "Uptime Kuma", icon: HeartPulse },
+  { id: "speedtest", label: "Speed Test", icon: Gauge },
   { id: "installer", label: "Instalador", icon: Terminal },
   { id: "settings", label: "Configuración", icon: Settings },
 ];

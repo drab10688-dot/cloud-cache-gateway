@@ -127,4 +127,15 @@ export const api = {
   // System updates
   updateDockerImages: () => apiFetch('/system/update-docker', { method: 'POST' }),
   updatePanel: () => apiFetch('/system/update-panel', { method: 'POST' }),
+
+  // Speed Test
+  speedTestPing: () => fetch(`${API_BASE}/speedtest/ping?t=${Date.now()}`, { cache: 'no-store' }),
+  speedTestDownload: (sizeMB: number) =>
+    fetch(`${API_BASE}/speedtest/download?size=${sizeMB}&t=${Date.now()}`, { cache: 'no-store' }),
+  speedTestUpload: (data: ArrayBuffer) =>
+    fetch(`${API_BASE}/speedtest/upload`, {
+      method: 'POST',
+      body: data,
+      headers: { 'Content-Type': 'application/octet-stream' },
+    }),
 };
