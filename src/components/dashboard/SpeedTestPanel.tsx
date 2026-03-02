@@ -281,26 +281,6 @@ export function SpeedTestPanel() {
 
   const isRunning = phase !== "idle" && phase !== "done";
 
-  const getSpeedRating = (mbps: number) => {
-    if (mbps >= 100) return { label: "Excelente", color: "text-success" };
-    if (mbps >= 50) return { label: "Muy bueno", color: "text-primary" };
-    if (mbps >= 20) return { label: "Bueno", color: "text-primary" };
-    if (mbps >= 5) return { label: "Aceptable", color: "text-warning" };
-    return { label: "Lento", color: "text-destructive" };
-  };
-
-  const getLatencyRating = (ms: number) => {
-    if (ms < 20) return { label: "Excelente", color: "text-success" };
-    if (ms < 50) return { label: "Bueno", color: "text-primary" };
-    return { label: "Alto", color: "text-warning" };
-  };
-
-  const getJitterRating = (ms: number) => {
-    if (ms < 5) return { label: "Estable", color: "text-success" };
-    if (ms < 15) return { label: "Normal", color: "text-primary" };
-    return { label: "Inestable", color: "text-warning" };
-  };
-
   return (
     <div>
       <div className="mb-8">
