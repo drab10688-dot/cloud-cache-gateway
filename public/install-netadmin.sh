@@ -419,8 +419,13 @@ const ADGUARD_URL = process.env.ADGUARD_URL || 'http://adguard:3000';
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 // Auth middleware
+// Parse raw body for speed test upload
+app.use('/api/speedtest/upload', express.raw({ type: 'application/octet-stream', limit: '50mb' }));
+
 app.use((req, res, next) => {
+  // Public routes (no auth required)
   if (req.path === '/api/auth/login') return next();
+  if (req.path.startsWith('/api/speedtest/')) return next();
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (token !== PANEL_PASS) return res.status(401).json({ error: 'No autorizado' });
   next();
@@ -978,6 +983,49 @@ app.post('/api/system/update-panel', (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// === SPEED TEST (public, no auth) ===
+app.get('/api/speedtest/ping', (req, res) => {
+  res.json({ ok: true, t: Date.now() });
+});
+
+app.get('/api/speedtest/download', (req, res) => {
+  const sizeMB = Math.min(parseInt(req.query.size) || 1, 100); // max 100MB
+  const bytes = sizeMB * 1024 * 1024;
+  res.set({
+    'Content-Type': 'application/octet-stream',
+    'Content-Length': bytes,
+    'Cache-Control': 'no-store, no-cache',
+    'X-Speed-Size': sizeMB + 'MB',
+  });
+  // Send random data in 1MB chunks
+  const chunkSize = 1024 * 1024;
+  let sent = 0;
+  const sendChunk = () => {
+    while (sent < bytes) {
+      const remaining = bytes - sent;
+      const size = Math.min(chunkSize, remaining);
+      const buf = Buffer.alloc(size);
+      // Fill with pseudo-random to prevent compression
+      for (let i = 0; i < size; i += 4) {
+        buf.writeUInt32LE(Math.random() * 0xFFFFFFFF >>> 0, i);
+      }
+      const canContinue = res.write(buf);
+      sent += size;
+      if (!canContinue) {
+        res.once('drain', sendChunk);
+        return;
+      }
+    }
+    res.end();
+  };
+  sendChunk();
+});
+
+app.post('/api/speedtest/upload', (req, res) => {
+  const size = req.headers['content-length'] || 0;
+  res.json({ ok: true, received: parseInt(size), t: Date.now() });
+});
+
 app.listen(API_PORT, '0.0.0.0', () => {
   console.log(`NetAdmin API v4.0 → http://0.0.0.0:${API_PORT}`);
 });
@@ -1042,6 +1090,7 @@ http {
     default_type application/octet-stream;
     sendfile on;
     gzip on;
+    client_max_body_size 50m;
 
     # Panel Web + API proxy
     server {
@@ -1052,6 +1101,16 @@ http {
 
         location / {
             try_files \$uri \$uri/ /index.html;
+        }
+
+        # Speed test API (public, no auth, higher timeout + body size)
+        location /api/speedtest/ {
+            proxy_pass http://netadmin-api:4000;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_read_timeout 120s;
+            proxy_send_timeout 120s;
+            client_max_body_size 50m;
         }
 
         location /api/ {
@@ -1666,6 +1725,7 @@ echo ""
 echo -e "  ${CYAN}Panel Web:${NC}        http://${IP_ADDR}:${PANEL_PORT}"
 echo -e "  ${CYAN}AdGuard Home:${NC}     http://${IP_ADDR}:3000"
 echo -e "  ${CYAN}Uptime Kuma:${NC}      http://${IP_ADDR}:3001"
+echo -e "  ${CYAN}Speed Test:${NC}       http://${IP_ADDR}:${PANEL_PORT}/speedtest"
 echo -e "  ${CYAN}Contraseña:${NC}       ${YELLOW}${PANEL_PASS}${NC}"
 echo ""
 echo -e "  ${CYAN}Caché configurada:${NC}"
