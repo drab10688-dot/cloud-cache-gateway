@@ -3,7 +3,7 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { StatusOverview } from "@/components/dashboard/StatusOverview";
 import { PingMonitor } from "@/components/dashboard/PingMonitor";
 import { DnsBlocklist } from "@/components/dashboard/DnsBlocklist";
-import { CacheStats } from "@/components/dashboard/CacheStats";
+
 import { AdGuardPanel } from "@/components/dashboard/AdGuardPanel";
 import { CloudflarePanel } from "@/components/dashboard/CloudflarePanel";
 import { InstallerPanel } from "@/components/dashboard/InstallerPanel";
@@ -17,7 +17,7 @@ import { SpeedTestPanel } from "@/components/dashboard/SpeedTestPanel";
 import { LoginScreen } from "@/components/dashboard/LoginScreen";
 import { isAuthenticated } from "@/lib/api";
 
-export type Section = "overview" | "ping" | "dns" | "cache" | "adguard" | "cloudflare" | "kuma" | "installer" | "docker" | "dnsconfig" | "network" | "mikrotik" | "speedtest" | "settings";
+export type Section = "overview" | "ping" | "dns" | "adguard" | "cloudflare" | "kuma" | "installer" | "docker" | "dnsconfig" | "network" | "mikrotik" | "speedtest" | "settings";
 
 const Index = () => {
   const [loggedIn, setLoggedIn] = useState(isAuthenticated());
@@ -36,7 +36,7 @@ const Index = () => {
       case "network": return <NetworkPerformancePanel />;
       case "ping": return <PingMonitor />;
       case "dns": return <DnsBlocklist />;
-      case "cache": return <CacheStats />;
+      
       case "adguard": return <AdGuardPanel />;
       case "cloudflare": return <CloudflarePanel />;
       case "kuma": return <UptimeKumaPanel />;

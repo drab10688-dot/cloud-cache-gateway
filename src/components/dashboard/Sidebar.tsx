@@ -25,7 +25,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "network", label: "QUIC / Video", icon: Zap },
   { id: "ping", label: "Monitor Ping", icon: Activity },
   { id: "dns", label: "DNS / Bloqueo", icon: ShieldCheck },
-  { id: "cache", label: "Caché CDN", icon: Database },
+  
   { id: "adguard", label: "AdGuard + Unbound", icon: Shield },
   { id: "cloudflare", label: "Cloudflare Tunnel", icon: Cloud },
   { id: "kuma", label: "Uptime Kuma", icon: HeartPulse },

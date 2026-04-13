@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse, RefreshCw, Copy, CheckCircle, Info, ExternalLink, Zap } from "lucide-react";
+import { Activity, Shield, Cloud, Wifi, Globe, Server, HeartPulse, RefreshCw, Copy, CheckCircle, Info, ExternalLink, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Services {
@@ -18,10 +18,6 @@ const serverIpGlobal = typeof window !== "undefined" ? window.location.hostname 
 const serviceConfig = [
   { key: "adguard", name: "AdGuard Home", icon: Shield, port: 3000, desc: "Filtrado DNS, bloqueo de ads" },
   { key: "unbound", name: "Unbound DNS", icon: Globe, desc: "DNS recursivo con caché" },
-  { key: "squid", name: "Squid Proxy (YouTube)", icon: MonitorSpeaker, port: 3128, desc: "Proxy caché SSL Bump" },
-  { key: "lancache", name: "Lancache (Steam/Windows)", icon: Gamepad2, desc: "Caché de juegos y updates" },
-  { key: "apt-cacher-ng", name: "apt-cacher-ng", icon: Package, port: 3142, desc: "Caché repos Linux" },
-  { key: "nginx", name: "Nginx CDN", icon: Database, desc: "Web server + CDN caché" },
   { key: "cloudflared", name: "Cloudflare Tunnel", icon: Cloud, desc: "Acceso remoto sin IP pública" },
   { key: "uptime-kuma", name: "Uptime Kuma", icon: HeartPulse, port: 3001, desc: "Monitoreo de servicios" },
   { key: "ping_monitor", name: "Monitor de Ping", icon: Activity, desc: "Detección de caídas" },
@@ -152,36 +148,6 @@ export function StatusOverview() {
             </div>
           </div>
 
-          {/* Proxy Config */}
-          <div className="bg-secondary/30 rounded-lg p-4">
-            <h4 className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
-              <MonitorSpeaker className="h-3.5 w-3.5 text-primary" />
-              Proxy Caché (YouTube, HTTPS)
-            </h4>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between bg-card rounded-md px-3 py-2 border border-border">
-                <div>
-                  <p className="text-xs text-muted-foreground">Proxy HTTP/HTTPS</p>
-                  <p className="text-sm font-mono font-bold text-primary">{serverIp}:3128</p>
-                </div>
-                <CopyButton text={`${serverIp}:3128`} field="proxy" />
-              </div>
-              <div className="flex items-center justify-between bg-card rounded-md px-3 py-2 border border-border">
-                <div>
-                  <p className="text-xs text-muted-foreground">apt-cacher-ng (repos Linux)</p>
-                  <p className="text-sm font-mono font-bold text-primary">{serverIp}:3142</p>
-                </div>
-                <CopyButton text={`${serverIp}:3142`} field="apt-cache" />
-              </div>
-              <div className="flex items-center justify-between bg-card rounded-md px-3 py-2 border border-border">
-                <div>
-                  <p className="text-xs text-muted-foreground">Certificado SSL (para HTTPS cache)</p>
-                  <p className="text-xs font-mono text-warning break-all">/etc/squid/ssl_cert/netadmin-ca.pem</p>
-                </div>
-                <CopyButton text="/etc/squid/ssl_cert/netadmin-ca.pem" field="cert" />
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Quick setup instructions */}
@@ -192,7 +158,6 @@ export function StatusOverview() {
               <p><strong className="text-foreground">Router/MikroTik:</strong> Cambia el DNS primario a <span className="text-primary font-mono">{serverIp}</span> en DHCP → DNS Settings</p>
               <p><strong className="text-foreground">Windows:</strong> Panel de control → Red → Adaptador → IPv4 → DNS: <span className="text-primary font-mono">{serverIp}</span></p>
               <p><strong className="text-foreground">Android/iOS:</strong> WiFi → Configuración avanzada → DNS: <span className="text-primary font-mono">{serverIp}</span></p>
-              <p><strong className="text-foreground">⚠ HTTPS cache:</strong> Instalar el certificado CA en cada dispositivo para evitar errores SSL</p>
             </div>
           </div>
         </div>

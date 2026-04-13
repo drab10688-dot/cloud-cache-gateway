@@ -81,17 +81,6 @@ export const api = {
   getBlocklistUpdateLog: () => apiFetch('/blocklist/update-log'),
   triggerBlocklistUpdate: () => apiFetch('/blocklist/update-now', { method: 'POST' }),
 
-  // Cache
-  getCacheSquid: () => apiFetch('/cache/squid'),
-  getCacheLancache: () => apiFetch('/cache/lancache'),
-  getCacheApt: () => apiFetch('/cache/apt'),
-  getCacheNginx: () => apiFetch('/cache/nginx'),
-  getCacheDisk: () => apiFetch('/cache/disk'),
-  purgeCache: (service: string) =>
-    apiFetch('/cache/purge', { method: 'POST', body: JSON.stringify({ service }) }),
-  getCleanupConfig: () => apiFetch('/cache/cleanup-config'),
-  setCleanupConfig: (enabled: boolean, threshold: number) =>
-    apiFetch('/cache/cleanup-config', { method: 'POST', body: JSON.stringify({ enabled, threshold }) }),
 
   // Kuma
   getKumaMonitors: () => apiFetch('/kuma/monitors'),

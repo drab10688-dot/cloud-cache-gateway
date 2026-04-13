@@ -20,11 +20,7 @@ const fallbackMonitors: Monitor[] = [
   { id: 1, name: "Google DNS", type: "ping", target: "8.8.8.8", status: "up", uptime: "—", ping: "—" },
   { id: 2, name: "Cloudflare DNS", type: "ping", target: "1.1.1.1", status: "up", uptime: "—", ping: "—" },
   { id: 3, name: "AdGuard Home", type: "http", target: "http://localhost:3000", status: "up", uptime: "—", ping: "—" },
-  { id: 4, name: "Squid Proxy", type: "port", target: "localhost:3128", status: "up", uptime: "—", ping: "—" },
-  { id: 5, name: "Nginx CDN", type: "http", target: "http://localhost:8888", status: "up", uptime: "—", ping: "—" },
-  { id: 6, name: "Lancache", type: "port", target: "localhost:8880", status: "up", uptime: "—", ping: "—" },
-  { id: 7, name: "apt-cacher-ng", type: "port", target: "localhost:3142", status: "up", uptime: "—", ping: "—" },
-  { id: 8, name: "NetAdmin API", type: "http", target: "http://localhost:4000/api/services", status: "up", uptime: "—", ping: "—" },
+  { id: 4, name: "NetAdmin API", type: "http", target: "http://localhost:4000/api/services", status: "up", uptime: "—", ping: "—" },
 ];
 
 export function UptimeKumaPanel() {
