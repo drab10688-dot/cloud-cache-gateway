@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Shield, Cloud, Wifi, Globe, Server, HeartPulse, RefreshCw, Copy, CheckCircle, Info, ExternalLink, Zap } from "lucide-react";
+import { Activity, Database, Shield, Cloud, Wifi, Globe, Package, Gamepad2, Server, HeartPulse, RefreshCw, Copy, CheckCircle, Info, ExternalLink, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Services {
@@ -18,6 +18,9 @@ const serverIpGlobal = typeof window !== "undefined" ? window.location.hostname 
 const serviceConfig = [
   { key: "adguard", name: "AdGuard Home", icon: Shield, port: 3000, desc: "Filtrado DNS, bloqueo de ads" },
   { key: "unbound", name: "Unbound DNS", icon: Globe, desc: "DNS recursivo con caché" },
+  { key: "lancache", name: "Lancache (Steam/Windows)", icon: Gamepad2, desc: "Caché de juegos y updates" },
+  { key: "apt-cacher-ng", name: "apt-cacher-ng", icon: Package, port: 3142, desc: "Caché repos Linux" },
+  { key: "nginx", name: "Nginx CDN", icon: Database, desc: "Web server + CDN caché" },
   { key: "cloudflared", name: "Cloudflare Tunnel", icon: Cloud, desc: "Acceso remoto sin IP pública" },
   { key: "uptime-kuma", name: "Uptime Kuma", icon: HeartPulse, port: 3001, desc: "Monitoreo de servicios" },
   { key: "ping_monitor", name: "Monitor de Ping", icon: Activity, desc: "Detección de caídas" },
