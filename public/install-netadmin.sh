@@ -277,7 +277,7 @@ wget -q -O ${NETADMIN_DIR}/configs/root.hints https://www.internic.net/domain/na
 cat > ${NETADMIN_DIR}/configs/unbound.conf << 'EOF'
 server:
     interface: 0.0.0.0
-    port: 53
+    port: 5335
     do-ip6: no
     access-control: 0.0.0.0/0 allow
     num-threads: 4
@@ -305,6 +305,54 @@ server:
     logfile: ""
     log-queries: no
 EOF
+
+# ============================================================
+# 3b. CONFIGURACIÓN ADGUARD HOME (upstream → Unbound :5335)
+# ============================================================
+log "Configurando AdGuard Home con Unbound como upstream..."
+mkdir -p ${NETADMIN_DIR}/data/adguard/conf
+
+cat > ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml << ADGUARD_CONF
+bind_host: 0.0.0.0
+bind_port: 3000
+users: []
+dns:
+  bind_hosts:
+    - 0.0.0.0
+  port: 53
+  upstream_dns:
+    - 127.0.0.1:5335
+  bootstrap_dns:
+    - 9.9.9.10
+    - 149.112.112.10
+  all_servers: false
+  fastest_addr: false
+  cache_size: 4194304
+  cache_ttl_min: 300
+  cache_ttl_max: 86400
+  ratelimit: 0
+  blocking_mode: default
+  protection_enabled: true
+  filtering_enabled: true
+  parental_enabled: false
+  safesearch_enabled: false
+  safebrowsing_enabled: true
+filters:
+  - enabled: true
+    url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+    name: AdGuard DNS filter
+    id: 1
+  - enabled: true
+    url: https://adaway.org/hosts.txt
+    name: AdAway Default Blocklist
+    id: 2
+  - enabled: true
+    url: https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+    name: Steven Black Hosts
+    id: 3
+ADGUARD_CONF
+
+success "AdGuard Home configurado → Unbound 127.0.0.1:5335"
 
 # ============================================================
 # 4. CONFIGURACIÓN SQUID SSL BUMP
@@ -1336,7 +1384,7 @@ services:
       - "53:53/udp"
       - "3000:3000/tcp"
     environment:
-      - UPSTREAM_DNS=172.20.0.10:53
+      - UPSTREAM_DNS=172.20.0.10:5335
     depends_on:
       - unbound
     networks:
@@ -1708,7 +1756,15 @@ log "Configurando firewall..."
 apt-get install -y -qq ufw
 ufw default deny incoming && ufw default allow outgoing
 ufw allow ssh
-ufw allow 53/tcp && ufw allow 53/udp
+# DNS solo desde red interna (ajusta la subred según tu red)
+INTERNAL_NET="${INTERNAL_NET:-192.168.0.0/16}"
+ufw allow from ${INTERNAL_NET} to any port 53 proto tcp
+ufw allow from ${INTERNAL_NET} to any port 53 proto udp
+# También permitir desde 10.0.0.0/8 y 172.16.0.0/12
+ufw allow from 10.0.0.0/8 to any port 53 proto tcp
+ufw allow from 10.0.0.0/8 to any port 53 proto udp
+ufw allow from 172.16.0.0/12 to any port 53 proto tcp
+ufw allow from 172.16.0.0/12 to any port 53 proto udp
 ufw allow ${PANEL_PORT}/tcp
 ufw allow 3001/tcp
 ufw allow 3128/tcp
