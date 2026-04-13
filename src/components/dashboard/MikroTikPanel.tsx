@@ -1,14 +1,116 @@
-import { useState } from "react";
-import { Router, Copy, CheckCircle, Globe, Info, Wifi, Zap, AlertTriangle, Shield, Activity, Server, ArrowRight } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Router, Copy, CheckCircle, Globe, Info, Zap, AlertTriangle, Shield, Activity, Server, ArrowRight, Play, Loader2, Wifi, Settings, XCircle, Link } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { api } from "@/lib/api";
+import { stepLabels } from "@/lib/mikrotik-commands";
+
+interface StepStatus {
+  loading: boolean;
+  result: 'idle' | 'success' | 'error';
+  message: string;
+}
 
 export function MikroTikPanel() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const serverIp = typeof window !== "undefined" ? window.location.hostname : "IP_DEL_SERVIDOR";
 
+  // MikroTik connection
+  const [mkHost, setMkHost] = useState(() => localStorage.getItem('mk-host') || '');
+  const [mkUser, setMkUser] = useState(() => localStorage.getItem('mk-user') || 'admin');
+  const [mkPass, setMkPass] = useState(() => localStorage.getItem('mk-pass') || '');
+  const [connected, setConnected] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [connMsg, setConnMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Step execution status
+  const [stepStatus, setStepStatus] = useState<Record<number, StepStatus>>({});
+
+  const saveConfig = useCallback(async () => {
+    if (!mkHost || !mkUser) return;
+    localStorage.setItem('mk-host', mkHost);
+    localStorage.setItem('mk-user', mkUser);
+    localStorage.setItem('mk-pass', mkPass);
+    setTesting(true);
+    setConnMsg(null);
+    try {
+      await api.mikrotikConfig(mkHost, mkUser, mkPass);
+      const result = await api.mikrotikTest();
+      if (result.success) {
+        setConnected(true);
+        setConnMsg({ type: 'success', text: `Conectado a ${result.identity || mkHost} (RouterOS ${result.version || '—'})` });
+      } else {
+        setConnected(false);
+        setConnMsg({ type: 'error', text: result.error || 'No se pudo conectar' });
+      }
+    } catch {
+      setConnected(false);
+      setConnMsg({ type: 'error', text: 'Error de conexión con el backend' });
+    } finally {
+      setTesting(false);
+    }
+  }, [mkHost, mkUser, mkPass]);
+
+  // Test connection on mount if config exists
+  useEffect(() => {
+    if (mkHost && mkUser) {
+      saveConfig();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const executeStep = async (step: number) => {
+    setStepStatus(prev => ({ ...prev, [step]: { loading: true, result: 'idle', message: 'Ejecutando...' } }));
+    try {
+      const result = await api.mikrotikExecute([`step:${step}:${serverIp}`]);
+      if (result.success) {
+        setStepStatus(prev => ({ ...prev, [step]: { loading: false, result: 'success', message: result.message || `${stepLabels[step]} aplicado correctamente` } }));
+      } else {
+        setStepStatus(prev => ({ ...prev, [step]: { loading: false, result: 'error', message: result.error || 'Error al ejecutar' } }));
+      }
+    } catch {
+      setStepStatus(prev => ({ ...prev, [step]: { loading: false, result: 'error', message: 'Error de conexión con el backend' } }));
+    }
+  };
+
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
     setCopiedField(field);
     setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const ExecuteButton = ({ step }: { step: number }) => {
+    const status = stepStatus[step];
+    const isLoading = status?.loading;
+    const isSuccess = status?.result === 'success';
+    const isError = status?.result === 'error';
+
+    return (
+      <div className="mt-3">
+        <div className="flex items-center gap-3">
+          <Button
+            size="sm"
+            onClick={() => executeStep(step)}
+            disabled={!connected || isLoading}
+            className={`gap-2 ${isSuccess ? 'bg-success hover:bg-success/90' : isError ? 'bg-destructive hover:bg-destructive/90' : ''}`}
+          >
+            {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> :
+             isSuccess ? <CheckCircle className="h-3.5 w-3.5" /> :
+             isError ? <XCircle className="h-3.5 w-3.5" /> :
+             <Play className="h-3.5 w-3.5" />}
+            {isLoading ? 'Ejecutando...' : isSuccess ? 'Aplicado ✓' : isError ? 'Reintentar' : `Aplicar: ${stepLabels[step]}`}
+          </Button>
+          {!connected && (
+            <span className="text-xs text-muted-foreground">Conecta tu MikroTik primero ↑</span>
+          )}
+        </div>
+        {status?.message && status.result !== 'idle' && (
+          <p className={`text-xs mt-1.5 ${isSuccess ? 'text-success' : 'text-destructive'}`}>
+            {status.message}
+          </p>
+        )}
+      </div>
+    );
   };
 
   const CopyBlock = ({ code, field, label }: { code: string; field: string; label?: string }) => (
@@ -31,8 +133,82 @@ export function MikroTikPanel() {
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-foreground">MikroTik + NetAdmin en Paralelo</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Topología: MikroTik (BNG/PPPoE) ↔ NetAdmin VPS — Optimización de internet para clientes
+          Topología: MikroTik (BNG/PPPoE) ↔ NetAdmin VPS — Ejecución automática via REST API
         </p>
+      </div>
+
+      {/* MikroTik Connection */}
+      <div className={`card-glow rounded-lg p-5 mb-6 border-2 ${connected ? 'border-success/40' : 'border-warning/40'}`}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className={`p-2 rounded-md ${connected ? 'bg-success/20' : 'bg-warning/20'}`}>
+            <Link className={`h-5 w-5 ${connected ? 'text-success' : 'text-warning'}`} />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-foreground">Conexión MikroTik REST API</h3>
+            <p className="text-xs text-muted-foreground">
+              {connected ? '✓ Conectado — puedes ejecutar comandos automáticamente' : 'Configura la conexión para ejecutar comandos desde aquí'}
+            </p>
+          </div>
+          {connected && (
+            <div className="flex items-center gap-1.5">
+              <div className="status-dot-online" />
+              <span className="text-xs text-success font-mono">Online</span>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">IP / Hostname</label>
+            <Input
+              placeholder="192.168.88.1"
+              value={mkHost}
+              onChange={e => setMkHost(e.target.value)}
+              className="h-9 text-sm font-mono"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Usuario</label>
+            <Input
+              placeholder="admin"
+              value={mkUser}
+              onChange={e => setMkUser(e.target.value)}
+              className="h-9 text-sm font-mono"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground mb-1 block">Contraseña</label>
+            <Input
+              type="password"
+              placeholder="••••••••"
+              value={mkPass}
+              onChange={e => setMkPass(e.target.value)}
+              className="h-9 text-sm font-mono"
+            />
+          </div>
+          <div className="flex items-end">
+            <Button onClick={saveConfig} disabled={testing || !mkHost} className="gap-2 w-full h-9">
+              {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Router className="h-4 w-4" />}
+              {testing ? 'Probando...' : 'Conectar'}
+            </Button>
+          </div>
+        </div>
+
+        {connMsg && (
+          <div className={`mt-3 p-2 rounded-md ${connMsg.type === 'success' ? 'bg-success/5 border border-success/20' : 'bg-destructive/5 border border-destructive/20'}`}>
+            <p className={`text-xs flex items-center gap-1.5 ${connMsg.type === 'success' ? 'text-success' : 'text-destructive'}`}>
+              {connMsg.type === 'success' ? <CheckCircle className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+              {connMsg.text}
+            </p>
+          </div>
+        )}
+
+        <div className="mt-3 p-2 rounded-md bg-primary/5 border border-primary/20">
+          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+            <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+            <span>Requiere <strong className="text-foreground">RouterOS v7+</strong> con REST API habilitada. El usuario debe tener permisos de escritura (full o policy: write, api, read).</span>
+          </p>
+        </div>
       </div>
 
       {/* Architecture diagram */}
@@ -108,6 +284,7 @@ export function MikroTikPanel() {
   action=dst-nat to-addresses=${serverIp} to-ports=53 \\
   comment="NetAdmin: Forzar DNS UDP"`}
         />
+        <ExecuteButton step={1} />
         <div className="mt-3 p-2 rounded-md bg-success/5 border border-success/20">
           <p className="text-xs text-success flex items-center gap-1.5">
             <CheckCircle className="h-3.5 w-3.5" />
@@ -135,6 +312,7 @@ export function MikroTikPanel() {
 # O si tienes un perfil específico:
 /ppp profile set default dns-server=${serverIp}`}
         />
+        <ExecuteButton step={2} />
       </div>
 
       {/* Step 3: Block QUIC */}
@@ -154,6 +332,7 @@ export function MikroTikPanel() {
 /ip firewall filter add chain=forward protocol=udp dst-port=80 \\
   action=drop comment="NetAdmin: Bloquear HTTP/3 alt"`}
         />
+        <ExecuteButton step={3} />
         <div className="mt-3 p-2 rounded-md bg-primary/5 border border-primary/20">
           <div className="flex items-start gap-1.5">
             <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
@@ -197,6 +376,7 @@ export function MikroTikPanel() {
   action=mark-packet new-packet-mark=voip-priority \\
   passthrough=no comment="NetAdmin: VoIP prioridad alta"`}
         />
+        <ExecuteButton step={4} />
       </div>
 
       {/* Step 5: Queue Tree */}
@@ -229,6 +409,7 @@ export function MikroTikPanel() {
   packet-mark=client-packets priority=5 max-limit=90M \\
   comment="NetAdmin: Tráfico general clientes"`}
         />
+        <ExecuteButton step={5} />
         <div className="mt-3 p-2 rounded-md bg-warning/5 border border-warning/20">
           <div className="flex items-start gap-1.5">
             <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0 mt-0.5" />
@@ -270,6 +451,7 @@ export function MikroTikPanel() {
   dns-server=${serverIp} \\
   comment="NetAdmin: Plan 10Mbps"`}
         />
+        <ExecuteButton step={6} />
       </div>
 
       {/* How it works together */}
@@ -284,38 +466,38 @@ export function MikroTikPanel() {
                   <tr className="border-b border-border">
                     <th className="text-left py-2 pr-4 text-muted-foreground font-medium">Componente</th>
                     <th className="text-left py-2 pr-4 text-muted-foreground font-medium">Qué hace</th>
-                    <th className="text-left py-2 pr-4 text-muted-foreground font-medium">Beneficio para el cliente</th>
+                    <th className="text-left py-2 pr-4 text-muted-foreground font-medium">Beneficio</th>
                   </tr>
                 </thead>
                 <tbody className="text-foreground">
                   <tr className="border-b border-border/50">
                     <td className="py-2 pr-4 font-mono text-primary">AdGuard DNS</td>
                     <td className="py-2 pr-4">Bloquea ads, trackers, malware</td>
-                    <td className="py-2 pr-4 text-success">Páginas cargan más rápido, menos datos</td>
+                    <td className="py-2 pr-4 text-success">Páginas cargan más rápido</td>
                   </tr>
                   <tr className="border-b border-border/50">
                     <td className="py-2 pr-4 font-mono text-primary">Unbound DNS</td>
                     <td className="py-2 pr-4">Caché DNS recursivo + DNSSEC</td>
-                    <td className="py-2 pr-4 text-success">Resolución DNS ~4ms vs ~50ms</td>
+                    <td className="py-2 pr-4 text-success">Resolución ~4ms vs ~50ms</td>
                   </tr>
                   <tr className="border-b border-border/50">
-                    <td className="py-2 pr-4 font-mono text-success">TCP BBR (VPS)</td>
+                    <td className="py-2 pr-4 font-mono text-success">TCP BBR</td>
                     <td className="py-2 pr-4">Algoritmo de congestión optimizado</td>
-                    <td className="py-2 pr-4 text-success">+10-30% throughput, menos buffering</td>
+                    <td className="py-2 pr-4 text-success">+10-30% throughput</td>
                   </tr>
                   <tr className="border-b border-border/50">
                     <td className="py-2 pr-4 font-mono text-warning">QUIC Block</td>
-                    <td className="py-2 pr-4">Fuerza TCP en video streaming</td>
-                    <td className="py-2 pr-4 text-success">BBR optimiza YouTube/Netflix</td>
+                    <td className="py-2 pr-4">Fuerza TCP en streaming</td>
+                    <td className="py-2 pr-4 text-success">BBR optimiza video</td>
                   </tr>
                   <tr className="border-b border-border/50">
                     <td className="py-2 pr-4 font-mono text-primary">QoS MikroTik</td>
-                    <td className="py-2 pr-4">Prioriza VoIP/DNS sobre descargas</td>
-                    <td className="py-2 pr-4 text-success">Llamadas sin cortes, gaming sin lag</td>
+                    <td className="py-2 pr-4">Prioriza VoIP/DNS</td>
+                    <td className="py-2 pr-4 text-success">Llamadas sin cortes</td>
                   </tr>
                   <tr>
                     <td className="py-2 pr-4 font-mono text-primary">Simple Queues</td>
-                    <td className="py-2 pr-4">Limita velocidad por plan</td>
+                    <td className="py-2 pr-4">Velocidad por plan</td>
                     <td className="py-2 pr-4 text-success">Cada cliente recibe lo que paga</td>
                   </tr>
                 </tbody>

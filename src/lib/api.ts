@@ -127,4 +127,12 @@ export const api = {
       body: data,
       headers: { 'Content-Type': 'application/octet-stream' },
     }),
+
+  // MikroTik REST API proxy
+  mikrotikExecute: (commands: string[]) =>
+    apiFetch('/mikrotik/execute', { method: 'POST', body: JSON.stringify({ commands }) }),
+  mikrotikTest: () => apiFetch('/mikrotik/test'),
+  mikrotikConfig: (host: string, user: string, password: string) =>
+    apiFetch('/mikrotik/config', { method: 'POST', body: JSON.stringify({ host, user, password }) }),
+  mikrotikGetConfig: () => apiFetch('/mikrotik/config'),
 };
