@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Terminal, Download, Copy, CheckCircle, Server, Shield, MonitorSpeaker, Package, Gamepad2, Cloud, Activity, HeartPulse, Trash2, AlertTriangle } from "lucide-react";
+import { Terminal, Download, Copy, CheckCircle, Server, Shield, Cloud, Activity, HeartPulse, Trash2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 

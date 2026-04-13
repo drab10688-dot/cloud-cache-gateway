@@ -1,7 +1,7 @@
 import {
   Activity,
   ShieldCheck,
-  Database,
+  
   Shield,
   Cloud,
   LayoutDashboard,
