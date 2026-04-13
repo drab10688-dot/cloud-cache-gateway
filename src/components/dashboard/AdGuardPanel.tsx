@@ -104,8 +104,8 @@ export function AdGuardPanel() {
           <pre className="text-xs font-mono text-muted-foreground bg-secondary/50 p-4 rounded-md overflow-x-auto">
 {`# /etc/unbound/unbound.conf
 server:
-  interface: 127.0.0.1
-  port: 5353
+  interface: 0.0.0.0
+  port: 5335
   do-ip6: no
   
   # Rendimiento
@@ -125,7 +125,8 @@ server:
   # Root hints
   root-hints: /var/lib/unbound/root.hints
 
-# AdGuard upstream: 127.0.0.1:5353`}
+# AdGuard upstream: 127.0.0.1:5335
+# AdGuard → Unbound (recursivo + DNSSEC)`}
           </pre>
         </div>
       </div>

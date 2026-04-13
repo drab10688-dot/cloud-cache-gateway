@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse, RefreshCw, Copy, CheckCircle, Info, ExternalLink } from "lucide-react";
+import { Activity, Database, Shield, Cloud, Wifi, Globe, MonitorSpeaker, Package, Gamepad2, Server, HeartPulse, RefreshCw, Copy, CheckCircle, Info, ExternalLink, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 
 interface Services {
@@ -34,17 +34,23 @@ export function StatusOverview() {
   const [pingStats, setPingStats] = useState({ current: 0, avg: 0 });
   const [loading, setLoading] = useState(true);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [adguardStats, setAdguardStats] = useState<{ blocked: string } | null>(null);
+  const [tcpBbr, setTcpBbr] = useState<{ bbr_active: boolean } | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
-      const [svc, sys, ping] = await Promise.all([
+      const [svc, sys, ping, adg, tcp] = await Promise.all([
         api.getServices(),
         api.getSystem(),
         api.getPing(),
+        api.getAdGuardStats().catch(() => null),
+        api.getTcpOptimization().catch(() => null),
       ]);
       setServices(svc);
       setSystem(sys);
       setPingStats(ping.stats);
+      if (adg) setAdguardStats({ blocked: adg.num_blocked_filtering?.toLocaleString() || adg.blocked || "—" });
+      if (tcp) setTcpBbr(tcp);
     } catch {
       // Use fallback data if API unavailable
     } finally {
@@ -234,8 +240,39 @@ export function StatusOverview() {
         })}
       </div>
 
+      {/* Combined DNS + TCP BBR Stats */}
+      <div className="card-glow rounded-lg p-5 mt-8 mb-6 border border-primary/20">
+        <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Zap className="h-4 w-4 text-primary" />
+          AdGuard + Unbound + TCP BBR — Rendimiento Integrado
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: "Consultas DNS Bloqueadas", value: adguardStats?.blocked || "—", icon: Shield, color: "text-destructive" },
+            { label: "Latencia DNS (Unbound)", value: `${pingStats.current || '—'}ms`, icon: Globe, color: "text-primary" },
+            { label: "Mejora Latencia BBR", value: tcpBbr?.bbr_active ? "Activo ✓" : "Inactivo", icon: Zap, color: tcpBbr?.bbr_active ? "text-success" : "text-warning" },
+            { label: "Upstream DNS", value: "Unbound :5335", icon: Server, color: "text-primary" },
+          ].map((s) => (
+            <div key={s.label} className="bg-secondary/30 rounded-lg p-4 text-center">
+              <s.icon className={`h-5 w-5 mx-auto mb-2 ${s.color}`} />
+              <p className={`text-xl font-bold font-mono ${s.color}`}>{s.value}</p>
+              <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 p-3 rounded-md bg-primary/5 border border-primary/20">
+          <div className="flex items-start gap-2">
+            <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+            <p className="text-xs text-muted-foreground">
+              <strong className="text-foreground">Flujo DNS:</strong> Cliente → AdGuard (filtrado) → Unbound 127.0.0.1:5335 (resolución recursiva + DNSSEC) | 
+              <strong className="text-foreground"> TCP BBR:</strong> Optimiza el throughput y reduce la latencia en todas las conexiones TCP del servidor.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Quick stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: "Latencia DNS", value: `${pingStats.current || '—'}ms`, color: "text-primary" },
           { label: "Promedio", value: `${pingStats.avg || '—'}ms`, color: "text-success" },

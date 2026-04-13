@@ -277,7 +277,7 @@ wget -q -O ${NETADMIN_DIR}/configs/root.hints https://www.internic.net/domain/na
 cat > ${NETADMIN_DIR}/configs/unbound.conf << 'EOF'
 server:
     interface: 0.0.0.0
-    port: 53
+    port: 5335
     do-ip6: no
     access-control: 0.0.0.0/0 allow
     num-threads: 4
@@ -1336,7 +1336,7 @@ services:
       - "53:53/udp"
       - "3000:3000/tcp"
     environment:
-      - UPSTREAM_DNS=172.20.0.10:53
+      - UPSTREAM_DNS=172.20.0.10:5335
     depends_on:
       - unbound
     networks:
@@ -1708,7 +1708,15 @@ log "Configurando firewall..."
 apt-get install -y -qq ufw
 ufw default deny incoming && ufw default allow outgoing
 ufw allow ssh
-ufw allow 53/tcp && ufw allow 53/udp
+# DNS solo desde red interna (ajusta la subred según tu red)
+INTERNAL_NET="${INTERNAL_NET:-192.168.0.0/16}"
+ufw allow from ${INTERNAL_NET} to any port 53 proto tcp
+ufw allow from ${INTERNAL_NET} to any port 53 proto udp
+# También permitir desde 10.0.0.0/8 y 172.16.0.0/12
+ufw allow from 10.0.0.0/8 to any port 53 proto tcp
+ufw allow from 10.0.0.0/8 to any port 53 proto udp
+ufw allow from 172.16.0.0/12 to any port 53 proto tcp
+ufw allow from 172.16.0.0/12 to any port 53 proto udp
 ufw allow ${PANEL_PORT}/tcp
 ufw allow 3001/tcp
 ufw allow 3128/tcp
