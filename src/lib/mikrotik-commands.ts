@@ -55,6 +55,18 @@ export function getStepCommands(step: number, serverIp: string, totalBw: number 
       return [
         { method: 'POST', endpoint: '/rest/ip/firewall/connection/tracking/set', body: { 'udp-timeout': '30s', 'udp-stream-timeout': '120s', 'icmp-timeout': '10s', 'generic-timeout': '120s', 'tcp-close-timeout': '10s', 'tcp-close-wait-timeout': '10s', 'tcp-fin-wait-timeout': '10s', 'tcp-last-ack-timeout': '10s', 'tcp-time-wait-timeout': '10s', 'tcp-syn-sent-timeout': '30s', 'tcp-syn-received-timeout': '10s', 'tcp-established-timeout': '7200s' } },
       ];
+    case 9: // Stealth Mode - TTL Normalization
+      return [
+        // Normalize all outgoing TTL to 64
+        { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', action: 'change-ttl', 'new-ttl': 'set:64', passthrough: 'yes', comment: 'NetAdmin Stealth: TTL normalize to 64' } },
+        // Normalize forwarded traffic TTL
+        { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'forward', action: 'change-ttl', 'new-ttl': 'set:64', passthrough: 'yes', comment: 'NetAdmin Stealth: TTL forward normalize' } },
+        // Limit simultaneous connections per client (prevent detection by high conn count)
+        { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'tcp', 'connection-limit': '200,32', action: 'drop', comment: 'NetAdmin Stealth: Limit TCP conn/client' } },
+        { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'connection-limit': '100,32', action: 'drop', comment: 'NetAdmin Stealth: Limit UDP conn/client' } },
+        // Force consistent MSS for uniform packet fingerprint
+        { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': '1360', passthrough: 'yes', comment: 'NetAdmin Stealth: Uniform MSS 1360' } },
+      ];
     default:
       return [];
   }
@@ -69,4 +81,5 @@ export const stepLabels: Record<number, string> = {
   6: 'Crear perfil PPPoE',
   7: 'MSS Clamping',
   8: 'Connection Tracking',
+  9: 'Modo Stealth',
 };

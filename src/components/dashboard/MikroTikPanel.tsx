@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Router, Copy, CheckCircle, Globe, Info, Zap, AlertTriangle, Shield, Activity, Server, ArrowRight, Play, Loader2, Wifi, Settings, XCircle, Link, Power, RefreshCw } from "lucide-react";
+import { Router, Copy, CheckCircle, Globe, Info, Zap, AlertTriangle, Shield, Activity, Server, ArrowRight, Play, Loader2, Wifi, Settings, XCircle, Link, Power, RefreshCw, Eye, EyeOff, Gauge, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { mikrotikDeviceApi, getDevice, type MikroTikDevice, MikroTikApiError } from "@/lib/mikrotik-api";
@@ -655,6 +655,116 @@ export function MikroTikPanel() {
         </div>
       </div>
 
+      {/* Step 9: Stealth Mode / Single-Host */}
+      <div className="card-glow rounded-lg p-5 mb-4 border-l-4 border-l-destructive">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-destructive text-destructive-foreground font-bold text-sm">9</div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <EyeOff className="h-4 w-4" />
+              Modo Stealth — Single-Host (Anti-Detección)
+            </h3>
+            <p className="text-xs text-muted-foreground">Oculta múltiples dispositivos del proveedor (Starlink, servicios residenciales)</p>
+          </div>
+        </div>
+
+        {/* Smart explanation */}
+        <div className="mb-4 p-3 rounded-md bg-destructive/5 border border-destructive/20">
+          <div className="flex items-start gap-2">
+            <Brain className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+            <div className="text-xs text-muted-foreground space-y-2">
+              <p className="font-semibold text-foreground">¿Cómo detectan los proveedores múltiples usuarios?</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
+                <div className="bg-card rounded-md p-2 border border-border">
+                  <p className="text-foreground font-semibold mb-1">🔍 TTL Variable</p>
+                  <p>Windows=128, Linux/Android=64, iOS=64. El proveedor ve distintos TTLs → múltiples dispositivos.</p>
+                  <p className="text-success mt-1">✓ Solución: Normalizar todo a TTL=64</p>
+                </div>
+                <div className="bg-card rounded-md p-2 border border-border">
+                  <p className="text-foreground font-semibold mb-1">📊 Conexiones Masivas</p>
+                  <p>Un solo usuario no abre 500+ conexiones TCP simultáneas. Muchas = sospechoso.</p>
+                  <p className="text-success mt-1">✓ Solución: Limitar conn/cliente</p>
+                </div>
+                <div className="bg-card rounded-md p-2 border border-border">
+                  <p className="text-foreground font-semibold mb-1">📦 Fingerprint TCP</p>
+                  <p>El tamaño MSS varía entre OS. Patrón mixto = varios dispositivos.</p>
+                  <p className="text-success mt-1">✓ Solución: MSS uniforme 1360</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <CopyBlock
+          field="stealth-mode"
+          code={`# ═══ MODO STEALTH — Anti-Detección de Múltiples Hosts ═══
+
+# 1) TTL Normalization — Todo el tráfico sale con TTL=64
+#    (Parece un solo dispositivo Linux/Android)
+/ip firewall mangle add chain=postrouting \\
+  action=change-ttl new-ttl=set:64 \\
+  passthrough=yes \\
+  comment="NetAdmin Stealth: TTL normalize to 64"
+
+/ip firewall mangle add chain=forward \\
+  action=change-ttl new-ttl=set:64 \\
+  passthrough=yes \\
+  comment="NetAdmin Stealth: TTL forward normalize"
+
+# 2) Límite de conexiones simultáneas por IP cliente
+#    (Evita que un solo cliente genere demasiadas conexiones)
+/ip firewall filter add chain=forward protocol=tcp \\
+  connection-limit=200,32 action=drop \\
+  comment="NetAdmin Stealth: Limit TCP conn/client"
+
+/ip firewall filter add chain=forward protocol=udp \\
+  connection-limit=100,32 action=drop \\
+  comment="NetAdmin Stealth: Limit UDP conn/client"
+
+# 3) MSS Uniforme — Elimina fingerprinting por tamaño de paquete
+/ip firewall mangle add chain=postrouting protocol=tcp \\
+  tcp-flags=syn action=change-mss new-mss=1360 \\
+  passthrough=yes \\
+  comment="NetAdmin Stealth: Uniform MSS 1360"
+
+# ═══ Verificar que Stealth está activo ═══
+/ip firewall mangle print where comment~"Stealth"
+/ip firewall filter print where comment~"Stealth"`}
+        />
+        <ExecuteButton step={9} />
+
+        {/* Smart tips */}
+        <div className="mt-4 space-y-2">
+          <div className="p-2 rounded-md bg-success/5 border border-success/20">
+            <p className="text-xs text-success flex items-start gap-1.5">
+              <CheckCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>
+                <strong>Resultado:</strong> El proveedor ve una sola "máquina Linux" con comportamiento uniforme.
+                TTL=64 constante, MSS=1360 en todos los paquetes, conexiones controladas.
+              </span>
+            </p>
+          </div>
+          <div className="p-2 rounded-md bg-warning/5 border border-warning/20">
+            <p className="text-xs text-warning flex items-start gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>
+                <strong>Ajuste inteligente:</strong> Si los clientes reportan lentitud, sube el límite TCP de 200 a 300.
+                Para gaming intensivo (Fortnite, CoD), sube UDP de 100 a 150.
+                El MSS=1360 es seguro para PPPoE, Starlink y túneles VPN.
+              </span>
+            </p>
+          </div>
+          <div className="p-2 rounded-md bg-primary/5 border border-primary/20">
+            <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+              <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+              <span>
+                <strong className="text-foreground">Ideal para:</strong> Starlink, operadores móviles (Claro, Movistar), servicios residenciales 
+                compartidos en zonas rurales donde no hay fibra dedicada disponible.
+              </span>
+            </p>
+          </div>
+        </div>
+      </div>
 
       <div className="card-glow rounded-lg p-5 mb-4">
         <div className="flex items-start gap-3">
@@ -696,10 +806,15 @@ export function MikroTikPanel() {
                     <td className="py-2 pr-4">Prioriza VoIP/DNS</td>
                     <td className="py-2 pr-4 text-success">Llamadas sin cortes</td>
                   </tr>
-                  <tr>
+                  <tr className="border-b border-border/50">
                     <td className="py-2 pr-4 font-mono text-primary">Simple Queues</td>
                     <td className="py-2 pr-4">Velocidad por plan</td>
                     <td className="py-2 pr-4 text-success">Cada cliente recibe lo que paga</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-4 font-mono text-destructive">Modo Stealth</td>
+                    <td className="py-2 pr-4">TTL + MSS + Conn Limit</td>
+                    <td className="py-2 pr-4 text-success">Proveedor ve 1 solo dispositivo</td>
                   </tr>
                 </tbody>
               </table>
