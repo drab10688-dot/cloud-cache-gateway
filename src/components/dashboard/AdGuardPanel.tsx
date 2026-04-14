@@ -4,6 +4,60 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useApi } from "@/hooks/use-api";
 
+function UnboundConfigBanner() {
+  const [copied, setCopied] = useState(false);
+  const serverIp = typeof window !== "undefined" ? window.location.hostname : "IP_DEL_SERVIDOR";
+  const adguardUrl = `http://${serverIp}:3000/#dns`;
+
+  const copyUpstream = () => {
+    navigator.clipboard.writeText("127.0.0.1:5335");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="card-glow rounded-lg p-4 mb-6 border-2 border-warning/30 bg-warning/5">
+      <div className="flex items-start gap-3">
+        <div className="p-2 rounded-md bg-warning/20 shrink-0">
+          <Info className="h-5 w-5 text-warning" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-sm font-semibold text-foreground mb-1">Configura Unbound como upstream en AdGuard</h4>
+          <p className="text-xs text-muted-foreground mb-3">
+            Para que AdGuard use Unbound como resolvedor recursivo, ve a <strong className="text-foreground">Configuración → DNS → Proveedores DNS</strong> y coloca:
+          </p>
+          <div className="flex items-center gap-2 mb-3">
+            <code className="flex-1 bg-card border border-border rounded-md px-3 py-2 text-sm font-mono text-primary">
+              127.0.0.1:5335
+            </code>
+            <button
+              onClick={copyUpstream}
+              className="p-2 rounded-md bg-secondary hover:bg-secondary/80 transition-colors shrink-0"
+              title="Copiar"
+            >
+              {copied ? <CheckCircle className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4 text-muted-foreground" />}
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            <a
+              href={adguardUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Abrir AdGuard → Configuración DNS
+            </a>
+          </div>
+          <p className="text-xs text-muted-foreground mt-3 border-t border-border/50 pt-2">
+            <strong className="text-foreground">Flujo:</strong> Cliente → AdGuard <span className="text-primary">:53</span> (filtrado) → Unbound <span className="text-primary">:5335</span> (recursivo + caché + DNSSEC)
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AdGuardPanel() {
   const fetchStatus = useCallback(() => api.getAdGuardStatus(), []);
   const fetchStats = useCallback(() => api.getAdGuardStats(), []);
