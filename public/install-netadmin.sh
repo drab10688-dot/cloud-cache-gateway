@@ -1700,7 +1700,7 @@ services:
     ports:
       - "53:53/tcp"
       - "53:53/udp"
-      - "3000:3000/tcp"
+      - "127.0.0.1:3000:3000/tcp"
     environment:
       - UPSTREAM_DNS=172.20.0.10:5335
     depends_on:
