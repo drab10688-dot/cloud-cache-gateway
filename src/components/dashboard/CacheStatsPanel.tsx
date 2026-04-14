@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Database, HardDrive, Download, TrendingUp, RefreshCw, Loader2, Server, Package } from "lucide-react";
+import { Database, HardDrive, Download, TrendingUp, RefreshCw, Loader2, Server, Package, Globe, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
@@ -155,7 +155,33 @@ export function CacheStatsPanel() {
             </div>
           )}
 
-          {/* Recent activity log */}
+          {/* Active cached domains/services */}
+          <div className="card-glow rounded-lg p-5">
+            <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+              <Globe className="h-4 w-4 text-primary" />
+              Dominios / Servicios Cacheados Activamente
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {cachedServices.map((svc) => (
+                <div key={svc.name} className="flex items-center gap-3 p-3 bg-secondary/50 rounded-md">
+                  <span className="text-xl">{svc.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground">{svc.name}</p>
+                    <p className="text-xs text-muted-foreground font-mono truncate">{svc.domains.join(", ")}</p>
+                  </div>
+                  {svc.active ? (
+                    <CheckCircle className="h-4 w-4 text-success shrink-0" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              Los dominios listados son redirigidos vía DNS al servidor de caché local. El estado se determina por la configuración de Lancache.
+            </p>
+          </div>
+
           {stats.recentActivity.length > 0 && (
             <div className="card-glow rounded-lg p-5">
               <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
