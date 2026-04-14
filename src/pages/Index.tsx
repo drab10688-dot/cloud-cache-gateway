@@ -12,6 +12,7 @@ import { DockerPanel } from "@/components/dashboard/DockerPanel";
 import { DnsConfigPanel } from "@/components/dashboard/DnsConfigPanel";
 import { NetworkPerformancePanel } from "@/components/dashboard/NetworkPerformancePanel";
 import { MikroTikPanel } from "@/components/dashboard/MikroTikPanel";
+import { LoadBalancingPanel } from "@/components/dashboard/LoadBalancingPanel";
 import { SettingsPanel } from "@/components/dashboard/SettingsPanel";
 import { SpeedTestPanel } from "@/components/dashboard/SpeedTestPanel";
 import { ServerMonitorPanel } from "@/components/dashboard/ServerMonitorPanel";
@@ -19,7 +20,7 @@ import { CacheStatsPanel } from "@/components/dashboard/CacheStatsPanel";
 import { LoginScreen } from "@/components/dashboard/LoginScreen";
 import { isAuthenticated } from "@/lib/api";
 
-export type Section = "overview" | "ping" | "dns" | "adguard" | "cloudflare" | "kuma" | "installer" | "docker" | "dnsconfig" | "network" | "mikrotik" | "speedtest" | "monitor" | "cache" | "settings";
+export type Section = "overview" | "ping" | "dns" | "adguard" | "cloudflare" | "kuma" | "installer" | "docker" | "dnsconfig" | "network" | "mikrotik" | "loadbalance" | "speedtest" | "monitor" | "cache" | "settings";
 
 const Index = () => {
   const [loggedIn, setLoggedIn] = useState(isAuthenticated());
@@ -35,6 +36,7 @@ const Index = () => {
       case "docker": return <DockerPanel />;
       case "dnsconfig": return <DnsConfigPanel />;
       case "mikrotik": return <MikroTikPanel />;
+      case "loadbalance": return <LoadBalancingPanel />;
       case "network": return <NetworkPerformancePanel />;
       case "ping": return <PingMonitor />;
       case "dns": return <DnsBlocklist />;
