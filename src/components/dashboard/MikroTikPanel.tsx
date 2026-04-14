@@ -766,7 +766,7 @@ export function MikroTikPanel() {
         </div>
       </div>
 
-
+      <div className="card-glow rounded-lg p-5 mb-4">
         <div className="flex items-start gap-3">
           <Info className="h-5 w-5 text-primary shrink-0 mt-0.5" />
           <div>
