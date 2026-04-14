@@ -9,7 +9,7 @@ import {
 interface ServerStats {
   cpu: number;
   memory: { used: number; total: number; percent: number };
-  disk: { used: string; total: string; percent: number };
+  disk: { used: string; total: string; percent: number; available?: string };
   network: { rx_bytes: number; tx_bytes: number; rx_speed: number; tx_speed: number };
   uptime: string;
 }
@@ -196,6 +196,39 @@ export function ServerMonitorPanel() {
           </div>
         </div>
       </div>
+
+      {/* Disk Detail */}
+      {stats && (
+        <div className="card-glow rounded-lg p-5 mb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <HardDrive className="h-4 w-4 text-primary" />
+            <h3 className="text-sm font-semibold text-foreground">Almacenamiento en Disco</h3>
+          </div>
+          <div className="relative h-6 w-full rounded-full bg-secondary overflow-hidden mb-3">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${progressColor(stats.disk.percent)}`}
+              style={{ width: `${stats.disk.percent}%` }}
+            />
+            <span className="absolute inset-0 flex items-center justify-center text-xs font-bold font-mono text-foreground">
+              {stats.disk.percent}% usado
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="bg-secondary/30 rounded-lg p-3">
+              <p className="text-xs text-muted-foreground">En Uso</p>
+              <p className={`text-lg font-bold font-mono ${gaugeColor(stats.disk.percent)}`}>{stats.disk.used}</p>
+            </div>
+            <div className="bg-secondary/30 rounded-lg p-3">
+              <p className="text-xs text-muted-foreground">Disponible</p>
+              <p className="text-lg font-bold font-mono text-success">{stats.disk.available || "—"}</p>
+            </div>
+            <div className="bg-secondary/30 rounded-lg p-3">
+              <p className="text-xs text-muted-foreground">Total</p>
+              <p className="text-lg font-bold font-mono text-muted-foreground">{stats.disk.total}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CPU + Memory Chart */}
       <div className="card-glow rounded-lg p-5 mb-6">
