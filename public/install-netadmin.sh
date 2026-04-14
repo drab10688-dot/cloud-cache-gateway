@@ -316,15 +316,22 @@ log "Configurando AdGuard Home con Unbound como upstream..."
 mkdir -p ${NETADMIN_DIR}/data/adguard/conf
 
 # Generate bcrypt hash for AdGuard admin user
-ADGUARD_HASH=$(htpasswd -bnBC 10 "" "${PANEL_PASS}" | tr -d ':\n' | sed 's/$2y/$2a/')
+ADGUARD_HASH=$(htpasswd -bnBC 10 "" "${PANEL_PASS}" | tr -d ':\n' | sed 's/\$2y/\$2a/')
 
-cat > ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml << ADGUARD_CONF
+# Write config - use temp file approach to avoid $ escaping issues with bcrypt hash
+cat > ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml << 'ADGUARD_CONF'
 schema_version: 28
 bind_host: 0.0.0.0
 bind_port: 3000
 users:
   - name: admin
-    password: ${ADGUARD_HASH}
+    password: ADGUARD_HASH_PLACEHOLDER
+ADGUARD_CONF
+# Replace placeholder with actual hash (contains $ characters)
+sed -i "s|ADGUARD_HASH_PLACEHOLDER|${ADGUARD_HASH}|" ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml
+
+# Append rest of config
+cat >> ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml << 'ADGUARD_CONF2'
 auth_attempts: 5
 block_auth_min: 15
 http_proxy: ""
@@ -365,7 +372,7 @@ filters:
     url: https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
     name: Steven Black Hosts
     id: 3
-ADGUARD_CONF
+ADGUARD_CONF2
 
 success "AdGuard Home configurado → Unbound 172.20.0.10:5335"
 
