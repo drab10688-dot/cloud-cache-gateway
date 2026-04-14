@@ -135,4 +135,7 @@ export const api = {
   mikrotikConfig: (host: string, user: string, password: string) =>
     apiFetch('/mikrotik/config', { method: 'POST', body: JSON.stringify({ host, user, password }) }),
   mikrotikGetConfig: () => apiFetch('/mikrotik/config'),
+
+  // Server Monitor
+  getServerMonitor: () => apiFetch('/system/monitor'),
 };
