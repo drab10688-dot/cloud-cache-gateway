@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Router, Loader2, CheckCircle, XCircle, ArrowRight, Play,
   Network, Shuffle, Link2, GitBranch, AlertTriangle, Info,
-  Activity, ArrowDown, ArrowUp, RefreshCw, ShieldCheck
+  Activity, ArrowDown, ArrowUp, RefreshCw, ShieldCheck,
+  Clock, History
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -353,6 +354,168 @@ function generateRoutingScript(
   }
 
   return lines.join("\n");
+}
+
+// ─── Failover Event Log Component ───────────────────────
+
+interface FailoverEvent {
+  time: string;
+  wan: string;
+  status: "UP" | "DOWN";
+  message: string;
+}
+
+function FailoverLog({ wans }: { wans: string[] }) {
+  const [events, setEvents] = useState<FailoverEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchLogs = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await mikrotikDeviceApi.execute([
+        `/log/print where message~"NetAdmin"`
+      ]);
+
+      if (result.results && Array.isArray(result.results)) {
+        const parsed: FailoverEvent[] = result.results
+          .filter((r: any) => {
+            const msg = (r.message || "").toLowerCase();
+            return msg.includes("up") || msg.includes("down");
+          })
+          .map((r: any) => {
+            const msg: string = r.message || "";
+            const isDown = msg.toLowerCase().includes("down");
+            const matchedWan = wans.find(w => msg.includes(w)) || "unknown";
+            return {
+              time: r.time || r[".time"] || "—",
+              wan: matchedWan,
+              status: isDown ? "DOWN" as const : "UP" as const,
+              message: msg,
+            };
+          })
+          .reverse()
+          .slice(0, 100);
+
+        setEvents(parsed);
+      }
+    } catch (e: any) {
+      setError(e.message || "Error al leer logs");
+    } finally {
+      setLoading(false);
+    }
+  }, [wans]);
+
+  useEffect(() => {
+    if (wans.length > 0) fetchLogs();
+  }, [wans, fetchLogs]);
+
+  // Auto-refresh every 30s
+  useEffect(() => {
+    if (wans.length === 0) return;
+    const id = setInterval(fetchLogs, 30000);
+    return () => clearInterval(id);
+  }, [wans, fetchLogs]);
+
+  if (wans.length === 0) return null;
+
+  // Calculate uptime stats
+  const downEvents = events.filter(e => e.status === "DOWN");
+  const upEvents = events.filter(e => e.status === "UP");
+
+  return (
+    <div className="card-glow rounded-lg p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <History className="h-4 w-4 text-primary" />
+          Historial de Eventos Failover
+        </h3>
+        <Button variant="outline" size="sm" onClick={fetchLogs} disabled={loading} className="gap-1.5">
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          Actualizar
+        </Button>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-secondary/50 rounded-lg p-3 text-center">
+          <p className="text-lg font-bold font-mono text-foreground">{events.length}</p>
+          <p className="text-xs text-muted-foreground">Total eventos</p>
+        </div>
+        <div className="bg-destructive/10 rounded-lg p-3 text-center">
+          <p className="text-lg font-bold font-mono text-destructive">{downEvents.length}</p>
+          <p className="text-xs text-muted-foreground">Caídas (DOWN)</p>
+        </div>
+        <div className="bg-success/10 rounded-lg p-3 text-center">
+          <p className="text-lg font-bold font-mono text-success">{upEvents.length}</p>
+          <p className="text-xs text-muted-foreground">Recuperaciones (UP)</p>
+        </div>
+      </div>
+
+      {/* Per-WAN status */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {wans.map(wan => {
+          const wanEvents = events.filter(e => e.wan === wan);
+          const lastEvent = wanEvents[0];
+          const isUp = !lastEvent || lastEvent.status === "UP";
+          return (
+            <div key={wan} className={`rounded-lg p-3 border-2 ${isUp ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5"}`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-mono font-semibold text-foreground">{wan}</span>
+                {isUp ? <CheckCircle className="h-3.5 w-3.5 text-success" /> : <XCircle className="h-3.5 w-3.5 text-destructive" />}
+              </div>
+              <p className={`text-xs font-bold ${isUp ? "text-success" : "text-destructive"}`}>
+                {isUp ? "ACTIVO" : "CAÍDO"}
+              </p>
+              {lastEvent && (
+                <p className="text-xs text-muted-foreground font-mono mt-1">{lastEvent.time}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      {/* Event timeline */}
+      {events.length > 0 ? (
+        <div className="max-h-72 overflow-y-auto space-y-1">
+          {events.map((event, i) => (
+            <div
+              key={i}
+              className={`flex items-center gap-3 px-3 py-2 rounded-md text-xs ${
+                event.status === "DOWN"
+                  ? "bg-destructive/10 border-l-2 border-l-destructive"
+                  : "bg-success/10 border-l-2 border-l-success"
+              }`}
+            >
+              <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
+              <span className="font-mono text-muted-foreground w-28 shrink-0">{event.time}</span>
+              <span className={`font-mono font-bold w-20 shrink-0 ${
+                event.status === "DOWN" ? "text-destructive" : "text-success"
+              }`}>
+                {event.status === "DOWN" ? "⬇ DOWN" : "⬆ UP"}
+              </span>
+              <span className="font-mono text-primary font-semibold w-16 shrink-0">{event.wan}</span>
+              <span className="text-muted-foreground truncate">{event.message}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-6">
+          <ShieldCheck className="h-8 w-8 mx-auto text-success mb-2" />
+          <p className="text-xs text-muted-foreground">
+            Sin eventos de failover registrados. Todas las WANs operando normalmente.
+          </p>
+        </div>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        💡 Los eventos se leen del log del MikroTik (entradas con "NetAdmin"). Se actualiza cada 30 segundos.
+      </p>
+    </div>
+  );
 }
 
 // ─── Traffic Monitor Component ──────────────────────────
@@ -966,6 +1129,9 @@ export function LoadBalancingPanel() {
 
           {/* Traffic Monitor */}
           <TrafficMonitor monitorInterfaces={monitorInterfaces} />
+
+          {/* Failover Event Log */}
+          {failoverEnabled && <FailoverLog wans={selectedWans} />}
 
           {/* Info */}
           <div className="card-glow rounded-lg p-4 border-l-4 border-l-primary">
