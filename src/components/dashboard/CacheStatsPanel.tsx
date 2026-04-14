@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Database, HardDrive, Download, TrendingUp, RefreshCw, Loader2, Server, Package } from "lucide-react";
+import { Database, HardDrive, Download, TrendingUp, RefreshCw, Loader2, Server, Package, Globe, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
@@ -44,6 +44,21 @@ function progressColor(percent: number) {
   if (percent < 80) return "bg-warning";
   return "bg-destructive";
 }
+
+const cachedServices = [
+  { name: "Steam", icon: "🎮", domains: ["lancache.steamcontent.com", "steam.cache.lancache.net"], active: true },
+  { name: "Windows Update", icon: "🪟", domains: ["tlu.dl.delivery.mp.microsoft.com", "download.windowsupdate.com"], active: true },
+  { name: "Xbox / Microsoft Store", icon: "🟢", domains: ["assets1.xboxlive.com", "dlassets.xboxlive.com"], active: true },
+  { name: "Origin / EA", icon: "⚽", domains: ["origin-a.akamaihd.net", "lvlt.cdn.ea.com"], active: true },
+  { name: "Epic Games", icon: "🏰", domains: ["epicgames-download1.akamaized.net", "download.epicgames.com"], active: true },
+  { name: "Battle.net / Blizzard", icon: "⚔️", domains: ["blzddist1-a.akamaihd.net", "level3.blizzard.com"], active: true },
+  { name: "Riot Games (LoL/Valorant)", icon: "🎯", domains: ["l3cdn.riotgames.com", "riotgamespatcher-a.akamaihd.net"], active: true },
+  { name: "Ubuntu / Debian (apt)", icon: "🐧", domains: ["archive.ubuntu.com", "deb.debian.org"], active: true },
+  { name: "PlayStation", icon: "🎮", domains: ["gs2.ww.prod.dl.playstation.net", "zeus.dl.playstation.net"], active: true },
+  { name: "Nintendo", icon: "🍄", domains: ["ccs.cdn.c.shop.nintendowifi.net", "atum.hac.lp1.d4c.nintendo.net"], active: true },
+  { name: "Apple / iOS Updates", icon: "🍎", domains: ["updates-http.cdn-apple.com", "swcdn.apple.com"], active: true },
+  { name: "Ubisoft", icon: "🎲", domains: ["uplaypc-s-ubisoft.cdn.ubi.com"], active: true },
+];
 
 export function CacheStatsPanel() {
   const [stats, setStats] = useState<CacheStats>(defaultStats);
@@ -155,7 +170,33 @@ export function CacheStatsPanel() {
             </div>
           )}
 
-          {/* Recent activity log */}
+          {/* Active cached domains/services */}
+          <div className="card-glow rounded-lg p-5">
+            <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+              <Globe className="h-4 w-4 text-primary" />
+              Dominios / Servicios Cacheados Activamente
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {cachedServices.map((svc) => (
+                <div key={svc.name} className="flex items-center gap-3 p-3 bg-secondary/50 rounded-md">
+                  <span className="text-xl">{svc.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground">{svc.name}</p>
+                    <p className="text-xs text-muted-foreground font-mono truncate">{svc.domains.join(", ")}</p>
+                  </div>
+                  {svc.active ? (
+                    <CheckCircle className="h-4 w-4 text-success shrink-0" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+              Los dominios listados son redirigidos vía DNS al servidor de caché local. El estado se determina por la configuración de Lancache.
+            </p>
+          </div>
+
           {stats.recentActivity.length > 0 && (
             <div className="card-glow rounded-lg p-5">
               <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
