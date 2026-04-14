@@ -24,7 +24,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "docker", label: "Contenedores", icon: Box },
   { id: "dnsconfig", label: "Config DNS", icon: Globe },
   { id: "mikrotik", label: "MikroTik", icon: Router },
-  { id: "loadbalance", label: "Balanceo de Carga", icon: Zap },
+  { id: "loadbalance", label: "Balanceo de Carga", icon: Network },
   { id: "network", label: "QUIC / Video", icon: Zap },
   { id: "ping", label: "Monitor Ping", icon: Activity },
   { id: "dns", label: "DNS / Bloqueo", icon: ShieldCheck },
