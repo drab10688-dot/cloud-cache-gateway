@@ -327,8 +327,15 @@ users:
   - name: admin
     password: ADGUARD_HASH_PLACEHOLDER
 ADGUARD_CONF
-# Replace placeholder with actual hash (contains $ characters)
-sed -i "s|ADGUARD_HASH_PLACEHOLDER|${ADGUARD_HASH}|" ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml
+# Replace placeholder with actual hash (use python to avoid shell escaping issues)
+python3 -c "
+import sys
+with open('${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml', 'r') as f:
+    content = f.read()
+content = content.replace('ADGUARD_HASH_PLACEHOLDER', '''${ADGUARD_HASH}''')
+with open('${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml', 'w') as f:
+    f.write(content)
+" 2>/dev/null || sed -i "s#ADGUARD_HASH_PLACEHOLDER#${ADGUARD_HASH}#" ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml
 
 # Append rest of config
 cat >> ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml << 'ADGUARD_CONF2'
