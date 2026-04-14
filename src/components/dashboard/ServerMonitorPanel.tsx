@@ -9,7 +9,7 @@ import {
 interface ServerStats {
   cpu: number;
   memory: { used: number; total: number; percent: number };
-  disk: { used: string; total: string; percent: number };
+  disk: { used: string; total: string; percent: number; available?: string };
   network: { rx_bytes: number; tx_bytes: number; rx_speed: number; tx_speed: number };
   uptime: string;
 }
