@@ -13,6 +13,7 @@ import {
   Router,
   Gauge,
   Monitor,
+  Database,
   Settings,
 } from "lucide-react";
 import type { Section } from "@/pages/Index";
@@ -32,6 +33,7 @@ const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "kuma", label: "Uptime Kuma", icon: HeartPulse },
   { id: "speedtest", label: "Speed Test", icon: Gauge },
   { id: "monitor", label: "Monitor Servidor", icon: Monitor },
+  { id: "cache", label: "Caché / Lancache", icon: Database },
   { id: "installer", label: "Instalador", icon: Terminal },
   { id: "settings", label: "Configuración", icon: Settings },
 ];
