@@ -90,7 +90,10 @@ if [ -d "/opt/netadmin" ] && [ -f "/opt/netadmin/docker-compose.yml" ]; then
 
   elif [ "$OPTION" = "1" ]; then
     log "Reinstalando NetAdmin..."
-    cd /opt/netadmin && docker compose down --rmi all --volumes --remove-orphans 2>/dev/null || true
+    cd /opt/netadmin && docker compose down --remove-orphans 2>/dev/null || true
+    # Force remove any orphan containers with netadmin- prefix
+    docker ps -a --filter "name=netadmin-" -q | xargs -r docker rm -f 2>/dev/null || true
+    docker compose -f /opt/netadmin/docker-compose.yml down --rmi all --volumes 2>/dev/null || true
     rm -rf /opt/netadmin
   else
     echo "Cancelado."
