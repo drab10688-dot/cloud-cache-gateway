@@ -645,7 +645,7 @@ const proxyAdGuard = (path, method = 'GET') => async (req, res) => {
     if (!contentType.includes('application/json')) {
       const text = await r.text();
       if (text.includes('<html') || text.includes('<!DOCTYPE')) {
-        return res.status(502).json({ error: 'AdGuard Home está en modo setup o no responde JSON. Accede a http://IP:3000 para completar la configuración inicial.' });
+        return res.status(502).json({ error: 'AdGuard Home está en modo setup o no responde JSON. Accede al panel en /adguard/ para completar la configuración inicial.' });
       }
       return res.json({});
     }
@@ -1302,6 +1302,49 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
   const results = [];
 
   for (const cmd of commands) {
+    if (cmd === 'interfaces:list') {
+      if (isApiProtocol) {
+        let api;
+        try {
+          api = await mkApiConnect(config);
+          const interfaceList = await api.write('/interface/print');
+          await api.close();
+          results.push({ cmd, success: true, result: interfaceList });
+        } catch (e) {
+          if (api) try { await api.close(); } catch {}
+          results.push({ cmd, success: false, error: `No se pudieron leer las interfaces: ${e.message}` });
+        }
+      } else {
+        try {
+          const agent = new https.Agent({ rejectUnauthorized: false });
+          const r = await fetch(`https://${config.host}:${config.port}/rest/interface`, {
+            headers: mkRestHeaders(config),
+            agent,
+          });
+          const text = await r.text().catch(() => '');
+          if (!r.ok) {
+            results.push({ cmd, success: false, error: `MikroTik respondió ${r.status}: ${text.slice(0, 200)}` });
+          } else {
+            results.push({ cmd, success: true, result: text ? JSON.parse(text) : [] });
+          }
+        } catch (e) {
+          results.push({ cmd, success: false, error: `No se pudieron leer las interfaces: ${e.message}` });
+        }
+      }
+      continue;
+    }
+
+    if (!cmd.startsWith('step:')) {
+      results.push({
+        cmd,
+        success: false,
+        error: isApiProtocol
+          ? 'Comando no soportado por este endpoint.'
+          : 'Los scripts avanzados requieren API RouterOS (puerto 8728/8729). En REST solo se soportan acciones guiadas e interfaces:list.',
+      });
+      continue;
+    }
+
     if (!cmd.startsWith('step:')) continue;
     const parts = cmd.split(':');
     const stepNum = parseInt(parts[1]);
@@ -1359,7 +1402,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
     }
   }
 
-  const allSuccess = results.every(r => r.success);
+  const allSuccess = results.length > 0 && results.every(r => r.success);
   res.json({ success: allSuccess, message: allSuccess ? 'Comandos ejecutados correctamente' : 'Algunos comandos fallaron', results });
 });
 
@@ -1508,6 +1551,20 @@ http {
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
             proxy_read_timeout 30s;
+        }
+
+        location = /adguard {
+            return 302 /adguard/;
+        }
+
+        location /adguard/ {
+            proxy_pass http://netadmin-adguard:3000/;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_set_header X-Forwarded-Prefix /adguard;
+            proxy_redirect / /adguard/;
         }
 
         location /kuma/ {
@@ -2147,7 +2204,7 @@ echo ""
 echo -e "  ${CYAN}Todo corre en:${NC} /opt/netadmin/docker-compose.yml"
 echo ""
 echo -e "  ${CYAN}Panel Web:${NC}        http://${IP_ADDR}:${PANEL_PORT}"
-echo -e "  ${CYAN}AdGuard Home:${NC}     http://localhost:3000 (solo local)"
+echo -e "  ${CYAN}AdGuard Home:${NC}     http://${IP_ADDR}:${PANEL_PORT}/adguard/"
 echo -e "  ${CYAN}Uptime Kuma:${NC}      http://${IP_ADDR}:3001"
 echo -e "  ${CYAN}Speed Test:${NC}       http://${IP_ADDR}:${PANEL_PORT}/speedtest"
 echo -e "  ${CYAN}Contraseña:${NC}       ${YELLOW}${PANEL_PASS}${NC}"
