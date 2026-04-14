@@ -16,7 +16,7 @@
 #   - Nginx (panel web + reverse proxy)
 # ============================================================
 
-set -e
+set -euo pipefail
 
 GREEN='\033[0;32m'; CYAN='\033[0;36m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 log() { echo -e "${CYAN}[NetAdmin]${NC} $1"; }
@@ -90,7 +90,10 @@ if [ -d "/opt/netadmin" ] && [ -f "/opt/netadmin/docker-compose.yml" ]; then
 
   elif [ "$OPTION" = "1" ]; then
     log "Reinstalando NetAdmin..."
-    cd /opt/netadmin && docker compose down --rmi all --volumes --remove-orphans 2>/dev/null || true
+    cd /opt/netadmin && docker compose down --remove-orphans 2>/dev/null || true
+    # Force remove any orphan containers with netadmin- prefix
+    docker ps -a --filter "name=netadmin-" -q | xargs -r docker rm -f 2>/dev/null || true
+    docker compose -f /opt/netadmin/docker-compose.yml down --rmi all --volumes 2>/dev/null || true
     rm -rf /opt/netadmin
   else
     echo "Cancelado."
@@ -321,8 +324,8 @@ dns:
     - 0.0.0.0
   port: 53
   upstream_dns:
-    - 127.0.0.1:5335
-  bootstrap_dns:
+    - 172.20.0.10:5335
+  fallback_dns:
     - 9.9.9.10
     - 149.112.112.10
   all_servers: false
@@ -352,7 +355,7 @@ filters:
     id: 3
 ADGUARD_CONF
 
-success "AdGuard Home configurado → Unbound 127.0.0.1:5335"
+success "AdGuard Home configurado → Unbound 172.20.0.10:5335"
 
 # ============================================================
 # 4. CONFIGURACIÓN SQUID SSL BUMP
@@ -400,7 +403,6 @@ http_access deny all
 
 access_log stdio:/var/log/squid/access.log squid
 cache_log stdio:/var/log/squid/cache.log
-visible_hostname netadmin-proxy
 visible_hostname netadmin-proxy
 SQUID_CONF
 
@@ -1320,6 +1322,59 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
   res.json({ success: allSuccess, message: allSuccess ? 'Comandos ejecutados correctamente' : 'Algunos comandos fallaron', results });
 });
 
+// === TELEGRAM ALERTS ===
+const TELEGRAM_CONFIG_FILE = '/data/tunnel/telegram-config.json';
+
+function getTelegramConfig() {
+  try { return JSON.parse(fs.readFileSync(TELEGRAM_CONFIG_FILE, 'utf8')); }
+  catch { return { botToken: '', chatId: '', enabled: false }; }
+}
+
+app.get('/api/telegram/config', requireAuth, (req, res) => {
+  const config = getTelegramConfig();
+  res.json({ chatId: config.chatId || '', enabled: !!config.enabled, configured: !!(config.botToken && config.chatId) });
+});
+
+app.post('/api/telegram/config', requireAuth, (req, res) => {
+  try {
+    const { botToken, chatId, enabled } = req.body;
+    const config = { botToken: botToken || '', chatId: chatId || '', enabled: !!enabled, updated: new Date().toISOString() };
+    fs.writeFileSync(TELEGRAM_CONFIG_FILE, JSON.stringify(config, null, 2));
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/telegram/test', requireAuth, async (req, res) => {
+  const config = getTelegramConfig();
+  if (!config.botToken || !config.chatId) return res.status(400).json({ error: 'Bot Token y Chat ID requeridos' });
+  try {
+    const msg = '🔔 *NetAdmin* — Test de conexión exitoso\\n✅ Las alertas de Telegram están funcionando.';
+    const r = await fetch(\`https://api.telegram.org/bot\${config.botToken}/sendMessage\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: config.chatId, text: msg, parse_mode: 'Markdown' }),
+    });
+    const data = await r.json();
+    if (data.ok) res.json({ success: true });
+    else res.json({ success: false, error: data.description || 'Error de Telegram' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/telegram/alert', requireAuth, async (req, res) => {
+  const config = getTelegramConfig();
+  if (!config.botToken || !config.chatId || !config.enabled) return res.status(400).json({ error: 'Telegram no configurado o desactivado' });
+  try {
+    const { message } = req.body;
+    const r = await fetch(\`https://api.telegram.org/bot\${config.botToken}/sendMessage\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: config.chatId, text: message, parse_mode: 'Markdown' }),
+    });
+    const data = await r.json();
+    res.json({ success: data.ok });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.listen(API_PORT, '0.0.0.0', () => {
   console.log(\`NetAdmin API v4.0 → http://0.0.0.0:\${API_PORT}\`);
 });
@@ -1366,8 +1421,10 @@ while true; do
 done
 PING_SCRIPT
 chmod +x ${NETADMIN_DIR}/configs/ping-monitor.sh
-# Fix line endings (remove Windows CRLF)
+# Fix line endings (remove Windows CRLF) on all generated scripts
 sed -i 's/\r$//' ${NETADMIN_DIR}/configs/ping-monitor.sh
+sed -i 's/\r$//' ${NETADMIN_DIR}/configs/update-blocklists.sh
+sed -i 's/\r$//' ${NETADMIN_DIR}/configs/cron-entry.sh
 
 # ============================================================
 # 8. NGINX CONFIG
@@ -1849,8 +1906,12 @@ success "Panel web compilado y desplegado"
 # ============================================================
 log "Construyendo imágenes y levantando servicios..."
 cd ${NETADMIN_DIR}
+
+# Clean any orphan containers from previous installs
+docker ps -a --filter "name=netadmin-" -q | xargs -r docker rm -f 2>/dev/null || true
+
 docker compose build --quiet
-docker compose up -d
+docker compose up -d --remove-orphans
 
 success "¡Todos los contenedores levantados!"
 
@@ -2032,7 +2093,7 @@ echo -e "  ${CYAN}Contraseña:${NC}       ${YELLOW}${PANEL_PASS}${NC}"
 echo ""
 echo -e "  ${CYAN}Caché configurada:${NC}"
 echo -e "    Squid (Video):     ${GREEN}${SQUID_CACHE_GB} GB${NC} (RAM: ${SQUID_CACHE_MEM} MB)"
-echo -e "    Lancache:          ${GREEN}${LANCACHE_CACHE_GB} GB${NC} (RAM: ${LANCACHE_CACHE_MEM} GB)"
+echo -e "    Lancache:          ${GREEN}${LANCACHE_CACHE_GB} GB${NC} (RAM: ${LANCACHE_CACHE_MEM} MB)"
 echo -e "    Nginx CDN:         ${GREEN}${NGINX_CACHE_GB} GB${NC}"
 echo -e "    Total:             ${GREEN}$((SQUID_CACHE_GB + LANCACHE_CACHE_GB + NGINX_CACHE_GB)) GB${NC}"
 echo ""
