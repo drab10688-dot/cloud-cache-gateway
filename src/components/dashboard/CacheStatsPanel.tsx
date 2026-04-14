@@ -45,6 +45,21 @@ function progressColor(percent: number) {
   return "bg-destructive";
 }
 
+const cachedServices = [
+  { name: "Steam", icon: "🎮", domains: ["lancache.steamcontent.com", "steam.cache.lancache.net"], active: true },
+  { name: "Windows Update", icon: "🪟", domains: ["tlu.dl.delivery.mp.microsoft.com", "download.windowsupdate.com"], active: true },
+  { name: "Xbox / Microsoft Store", icon: "🟢", domains: ["assets1.xboxlive.com", "dlassets.xboxlive.com"], active: true },
+  { name: "Origin / EA", icon: "⚽", domains: ["origin-a.akamaihd.net", "lvlt.cdn.ea.com"], active: true },
+  { name: "Epic Games", icon: "🏰", domains: ["epicgames-download1.akamaized.net", "download.epicgames.com"], active: true },
+  { name: "Battle.net / Blizzard", icon: "⚔️", domains: ["blzddist1-a.akamaihd.net", "level3.blizzard.com"], active: true },
+  { name: "Riot Games (LoL/Valorant)", icon: "🎯", domains: ["l3cdn.riotgames.com", "riotgamespatcher-a.akamaihd.net"], active: true },
+  { name: "Ubuntu / Debian (apt)", icon: "🐧", domains: ["archive.ubuntu.com", "deb.debian.org"], active: true },
+  { name: "PlayStation", icon: "🎮", domains: ["gs2.ww.prod.dl.playstation.net", "zeus.dl.playstation.net"], active: true },
+  { name: "Nintendo", icon: "🍄", domains: ["ccs.cdn.c.shop.nintendowifi.net", "atum.hac.lp1.d4c.nintendo.net"], active: true },
+  { name: "Apple / iOS Updates", icon: "🍎", domains: ["updates-http.cdn-apple.com", "swcdn.apple.com"], active: true },
+  { name: "Ubisoft", icon: "🎲", domains: ["uplaypc-s-ubisoft.cdn.ubi.com"], active: true },
+];
+
 export function CacheStatsPanel() {
   const [stats, setStats] = useState<CacheStats>(defaultStats);
   const [loading, setLoading] = useState(true);
