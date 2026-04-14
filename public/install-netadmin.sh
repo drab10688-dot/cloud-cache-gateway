@@ -1139,7 +1139,8 @@ app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
   if (!config) return res.status(400).json({ success: false, error: 'No hay configuración MikroTik guardada. Configura primero.' });
 
   // RouterOS API protocol (v6 or v7 API port)
-  if (config.version === 'v6' || config.port === 8728 || config.port === 8729) {
+  const isApiProtocol = config.version === 'v6' || [8728, 8729, 8730].includes(config.port);
+  if (isApiProtocol) {
     let api;
     try {
       api = await mkApiConnect(config);
@@ -1257,7 +1258,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
   const { commands } = req.body;
   if (!commands || !Array.isArray(commands)) return res.status(400).json({ success: false, error: 'commands debe ser un array' });
 
-  const isApiProtocol = config.version === 'v6' || config.port === 8728 || config.port === 8729;
+  const isApiProtocol = config.version === 'v6' || [8728, 8729, 8730].includes(config.port);
   const results = [];
 
   for (const cmd of commands) {
