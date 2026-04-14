@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Router, Loader2, CheckCircle, XCircle, ArrowRight, Play,
   Network, Shuffle, Link2, GitBranch, AlertTriangle, Info,
   Activity, ArrowDown, ArrowUp, RefreshCw, ShieldCheck,
-  Clock, History
+  Clock, History, Send, Bell, BellOff, MessageCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { api } from "@/lib/api";
 import { mikrotikDeviceApi, getDevice, type MikroTikDevice } from "@/lib/mikrotik-api";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
@@ -356,7 +357,7 @@ function generateRoutingScript(
   return lines.join("\n");
 }
 
-// ─── Failover Event Log Component ───────────────────────
+// ─── Telegram Config + Failover Event Log Component ─────
 
 interface FailoverEvent {
   time: string;
@@ -365,10 +366,89 @@ interface FailoverEvent {
   message: string;
 }
 
+interface TelegramConfig {
+  botToken: string;
+  chatId: string;
+  enabled: boolean;
+}
+
 function FailoverLog({ wans }: { wans: string[] }) {
   const [events, setEvents] = useState<FailoverEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Telegram state
+  const [tgConfig, setTgConfig] = useState<TelegramConfig>({ botToken: "", chatId: "", enabled: false });
+  const [tgSaving, setTgSaving] = useState(false);
+  const [tgTesting, setTgTesting] = useState(false);
+  const [tgMsg, setTgMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [showTgConfig, setShowTgConfig] = useState(false);
+  const [pingLossThreshold] = useState(15);
+
+  // Track already-alerted events to avoid duplicates
+  const alertedRef = useRef<Set<string>>(new Set());
+  // Track consecutive ping failures per WAN
+  const pingFailCountRef = useRef<Record<string, number>>({});
+
+  // Load Telegram config on mount
+  useEffect(() => {
+    api.getTelegramConfig().then((res: any) => {
+      if (res.botToken || res.chatId) {
+        setTgConfig({ botToken: res.botToken || "", chatId: res.chatId || "", enabled: res.enabled ?? false });
+      }
+    }).catch(() => {});
+  }, []);
+
+  const saveTelegramConfig = async () => {
+    setTgSaving(true);
+    setTgMsg(null);
+    try {
+      const res = await api.setTelegramConfig(tgConfig.botToken, tgConfig.chatId, tgConfig.enabled);
+      if (res.success) {
+        setTgMsg({ type: "success", text: "Configuración de Telegram guardada" });
+      } else {
+        setTgMsg({ type: "error", text: res.error || "Error al guardar" });
+      }
+    } catch {
+      setTgMsg({ type: "error", text: "Error de conexión" });
+    } finally {
+      setTgSaving(false);
+    }
+  };
+
+  const testTelegram = async () => {
+    setTgTesting(true);
+    setTgMsg(null);
+    try {
+      const res = await api.sendTelegramTest();
+      if (res.success) {
+        setTgMsg({ type: "success", text: "✅ Mensaje de prueba enviado. Revisa tu Telegram." });
+      } else {
+        setTgMsg({ type: "error", text: res.error || "Error al enviar prueba" });
+      }
+    } catch {
+      setTgMsg({ type: "error", text: "Error de conexión" });
+    } finally {
+      setTgTesting(false);
+    }
+  };
+
+  // Send Telegram alert for new failover events
+  const sendAlert = useCallback(async (event: FailoverEvent) => {
+    const key = `${event.time}-${event.wan}-${event.status}`;
+    if (alertedRef.current.has(key)) return;
+    alertedRef.current.add(key);
+
+    const emoji = event.status === "DOWN" ? "🔴" : "🟢";
+    const statusText = event.status === "DOWN" ? "CAÍDA" : "RECUPERADA";
+    const msg = `${emoji} *WAN ${statusText}*\n\n📡 Interfaz: \`${event.wan}\`\n🕐 Hora: \`${event.time}\`\n📝 ${event.message}`;
+
+    try {
+      await api.sendTelegramAlert(msg);
+    } catch {
+      // Silent fail - alert delivery is best-effort
+    }
+  }, []);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -399,13 +479,59 @@ function FailoverLog({ wans }: { wans: string[] }) {
           .slice(0, 100);
 
         setEvents(parsed);
+
+        // Auto-send Telegram alerts for new DOWN/UP events
+        if (tgConfig.enabled && tgConfig.botToken && tgConfig.chatId) {
+          parsed.forEach(ev => sendAlert(ev));
+        }
       }
     } catch (e: any) {
       setError(e.message || "Error al leer logs");
     } finally {
       setLoading(false);
     }
-  }, [wans]);
+  }, [wans, tgConfig.enabled, tgConfig.botToken, tgConfig.chatId, sendAlert]);
+
+  // Ping loss monitoring
+  useEffect(() => {
+    if (!tgConfig.enabled || wans.length === 0) return;
+
+    const checkPingLoss = async () => {
+      for (const wan of wans) {
+        try {
+          const result = await mikrotikDeviceApi.execute([
+            `/ping 8.8.8.8 interface=${wan} count=1`
+          ]);
+          const hasResponse = result.results?.[0]?.["received"] !== "0" &&
+                             result.results?.[0]?.["received"] !== undefined;
+
+          if (!hasResponse) {
+            pingFailCountRef.current[wan] = (pingFailCountRef.current[wan] || 0) + 1;
+
+            if (pingFailCountRef.current[wan] === pingLossThreshold) {
+              const msg = `⚠️ *ALERTA: Pérdida de ping crítica*\n\n📡 Interfaz: \`${wan}\`\n❌ ${pingLossThreshold} pings consecutivos fallidos\n🕐 ${new Date().toLocaleTimeString("es")}`;
+              try {
+                await api.sendTelegramAlert(msg);
+              } catch {}
+            }
+          } else {
+            if (pingFailCountRef.current[wan] >= pingLossThreshold) {
+              const msg = `✅ *Ping restaurado*\n\n📡 Interfaz: \`${wan}\`\n🔄 Conectividad recuperada después de ${pingFailCountRef.current[wan]} fallos\n🕐 ${new Date().toLocaleTimeString("es")}`;
+              try {
+                await api.sendTelegramAlert(msg);
+              } catch {}
+            }
+            pingFailCountRef.current[wan] = 0;
+          }
+        } catch {
+          // Can't ping — ignore
+        }
+      }
+    };
+
+    const id = setInterval(checkPingLoss, 10000); // Check every 10s
+    return () => clearInterval(id);
+  }, [tgConfig.enabled, wans, pingLossThreshold]);
 
   useEffect(() => {
     if (wans.length > 0) fetchLogs();
@@ -420,7 +546,6 @@ function FailoverLog({ wans }: { wans: string[] }) {
 
   if (wans.length === 0) return null;
 
-  // Calculate uptime stats
   const downEvents = events.filter(e => e.status === "DOWN");
   const upEvents = events.filter(e => e.status === "UP");
 
@@ -431,11 +556,117 @@ function FailoverLog({ wans }: { wans: string[] }) {
           <History className="h-4 w-4 text-primary" />
           Historial de Eventos Failover
         </h3>
-        <Button variant="outline" size="sm" onClick={fetchLogs} disabled={loading} className="gap-1.5">
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-          Actualizar
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant={showTgConfig ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowTgConfig(!showTgConfig)}
+            className="gap-1.5"
+          >
+            <MessageCircle className="h-3.5 w-3.5" />
+            Telegram
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchLogs} disabled={loading} className="gap-1.5">
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Actualizar
+          </Button>
+        </div>
       </div>
+
+      {/* Telegram Configuration */}
+      {showTgConfig && (
+        <div className="bg-secondary/50 rounded-lg p-4 space-y-4 border border-border">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <MessageCircle className="h-4 w-4 text-chart-2" />
+              Alertas por Telegram
+            </h4>
+            <button
+              onClick={() => {
+                const newConfig = { ...tgConfig, enabled: !tgConfig.enabled };
+                setTgConfig(newConfig);
+              }}
+              className={`relative w-12 h-6 rounded-full transition-all ${
+                tgConfig.enabled ? "bg-success" : "bg-muted"
+              }`}
+            >
+              <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                tgConfig.enabled ? "left-6" : "left-0.5"
+              }`} />
+            </button>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Recibe alertas instantáneas cuando una WAN se caiga, se recupere, o tenga {pingLossThreshold}+ pings consecutivos fallidos.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1.5">Bot Token (de @BotFather)</label>
+              <Input
+                type="password"
+                placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v..."
+                value={tgConfig.botToken}
+                onChange={e => setTgConfig(prev => ({ ...prev, botToken: e.target.value }))}
+                className="bg-background border-border font-mono text-xs"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1.5">Chat ID (de @userinfobot)</label>
+              <Input
+                placeholder="123456789"
+                value={tgConfig.chatId}
+                onChange={e => setTgConfig(prev => ({ ...prev, chatId: e.target.value }))}
+                className="bg-background border-border font-mono text-xs"
+              />
+            </div>
+          </div>
+
+          {tgMsg && (
+            <div className={`flex items-center gap-2 text-xs font-mono p-3 rounded-md ${
+              tgMsg.type === "success" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
+            }`}>
+              {tgMsg.type === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+              {tgMsg.text}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Button onClick={saveTelegramConfig} disabled={tgSaving} size="sm" className="gap-1.5">
+              {tgSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+              Guardar
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={testTelegram}
+              disabled={tgTesting || !tgConfig.botToken || !tgConfig.chatId}
+              className="gap-1.5"
+            >
+              {tgTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              Enviar Prueba
+            </Button>
+          </div>
+
+          {tgConfig.enabled && (
+            <div className="bg-success/10 border border-success/30 rounded-md p-3">
+              <p className="text-xs text-foreground flex items-center gap-2">
+                <Bell className="h-3.5 w-3.5 text-success" />
+                <strong>Alertas activas:</strong> Recibirás notificaciones por Telegram cuando una WAN caiga/se recupere o tenga {pingLossThreshold}+ pings fallidos consecutivos.
+              </p>
+            </div>
+          )}
+
+          {!tgConfig.enabled && tgConfig.botToken && tgConfig.chatId && (
+            <div className="bg-warning/10 border border-warning/30 rounded-md p-3">
+              <p className="text-xs text-foreground flex items-center gap-2">
+                <BellOff className="h-3.5 w-3.5 text-warning" />
+                Las alertas están configuradas pero <strong>desactivadas</strong>. Activa el toggle para recibirlas.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-3">
@@ -513,6 +744,7 @@ function FailoverLog({ wans }: { wans: string[] }) {
 
       <p className="text-xs text-muted-foreground">
         💡 Los eventos se leen del log del MikroTik (entradas con "NetAdmin"). Se actualiza cada 30 segundos.
+        {tgConfig.enabled && " Las alertas de Telegram se envían automáticamente."}
       </p>
     </div>
   );

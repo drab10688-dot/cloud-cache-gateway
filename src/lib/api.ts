@@ -141,4 +141,12 @@ export const api = {
 
   // Cache Stats (Lancache / apt-cacher-ng / Nginx)
   getCacheStats: () => apiFetch('/cache/stats'),
+
+  // Telegram alerts
+  getTelegramConfig: () => apiFetch('/telegram/config'),
+  setTelegramConfig: (botToken: string, chatId: string, enabled: boolean) =>
+    apiFetch('/telegram/config', { method: 'POST', body: JSON.stringify({ botToken, chatId, enabled }) }),
+  sendTelegramTest: () => apiFetch('/telegram/test', { method: 'POST' }),
+  sendTelegramAlert: (message: string) =>
+    apiFetch('/telegram/send', { method: 'POST', body: JSON.stringify({ message }) }),
 };
