@@ -237,7 +237,7 @@ echo ""
 # ============================================================
 log "Instalando Docker..."
 apt-get update -qq
-apt-get install -y -qq curl wget jq openssl ca-certificates gnupg lsb-release
+apt-get install -y -qq curl wget jq openssl ca-certificates gnupg lsb-release apache2-utils
 
 if ! command -v docker &>/dev/null; then
   curl -fsSL https://get.docker.com | sh
@@ -315,10 +315,41 @@ EOF
 log "Configurando AdGuard Home con Unbound como upstream..."
 mkdir -p ${NETADMIN_DIR}/data/adguard/conf
 
-cat > ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml << ADGUARD_CONF
+# Generate bcrypt hash for AdGuard admin user
+ADGUARD_HASH=$(htpasswd -bnBC 10 "" "${PANEL_PASS}" | tr -d ':\n' | sed 's/\$2y/\$2a/')
+
+# Write config - use temp file approach to avoid $ escaping issues with bcrypt hash
+cat > ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml << 'ADGUARD_CONF'
+schema_version: 28
 bind_host: 0.0.0.0
 bind_port: 3000
-users: []
+users:
+  - name: admin
+    password: ADGUARD_HASH_PLACEHOLDER
+ADGUARD_CONF
+# Replace placeholder with actual hash (write to temp file to avoid shell escaping)
+printf '%s' "$ADGUARD_HASH" > /tmp/_adguard_hash.tmp
+CFG_FILE="${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml"
+python3 - "$CFG_FILE" << 'PYSCRIPT'
+import sys
+cfg = sys.argv[1]
+with open('/tmp/_adguard_hash.tmp') as f:
+    h = f.read().strip()
+with open(cfg) as f:
+    content = f.read()
+content = content.replace('ADGUARD_HASH_PLACEHOLDER', h)
+with open(cfg, 'w') as f:
+    f.write(content)
+PYSCRIPT
+rm -f /tmp/_adguard_hash.tmp
+
+# Append rest of config
+cat >> ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml << 'ADGUARD_CONF2'
+auth_attempts: 5
+block_auth_min: 15
+http_proxy: ""
+language: es
+theme: auto
 dns:
   bind_hosts:
     - 0.0.0.0
@@ -338,7 +369,8 @@ dns:
   protection_enabled: true
   filtering_enabled: true
   parental_enabled: false
-  safesearch_enabled: false
+  safesearch:
+    enabled: false
   safebrowsing_enabled: true
 filters:
   - enabled: true
@@ -353,7 +385,7 @@ filters:
     url: https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
     name: Steven Black Hosts
     id: 3
-ADGUARD_CONF
+ADGUARD_CONF2
 
 success "AdGuard Home configurado → Unbound 172.20.0.10:5335"
 
@@ -608,9 +640,17 @@ const proxyAdGuard = (path, method = 'GET') => async (req, res) => {
   try {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (method === 'POST') opts.body = JSON.stringify(req.body);
-    const r = await fetch(`${ADGUARD_URL}${path}`, opts);
+    const r = await fetch(\`\${ADGUARD_URL}\${path}\`, opts);
+    const contentType = r.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await r.text();
+      if (text.includes('<html') || text.includes('<!DOCTYPE')) {
+        return res.status(502).json({ error: 'AdGuard Home está en modo setup o no responde JSON. Accede a http://IP:3000 para completar la configuración inicial.' });
+      }
+      return res.json({});
+    }
     res.json(await r.json());
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: \`No se pudo conectar con AdGuard Home: \${e.message}\` }); }
 };
 
 app.get('/api/adguard/status', proxyAdGuard('/control/status'));
@@ -1139,7 +1179,7 @@ app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
   if (!config) return res.status(400).json({ success: false, error: 'No hay configuración MikroTik guardada. Configura primero.' });
 
   // RouterOS API protocol (v6 or v7 API port)
-  const isApiProtocol = config.version === 'v6' || [8728, 8729, 8730].includes(config.port);
+  const isApiProtocol = config.version === 'v6' || (config.port !== 443 && config.port !== 80);
   if (isApiProtocol) {
     let api;
     try {
@@ -1258,7 +1298,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
   const { commands } = req.body;
   if (!commands || !Array.isArray(commands)) return res.status(400).json({ success: false, error: 'commands debe ser un array' });
 
-  const isApiProtocol = config.version === 'v6' || [8728, 8729, 8730].includes(config.port);
+  const isApiProtocol = config.version === 'v6' || (config.port !== 443 && config.port !== 80);
   const results = [];
 
   for (const cmd of commands) {
@@ -1680,7 +1720,7 @@ services:
     ports:
       - "53:53/tcp"
       - "53:53/udp"
-      - "3000:3000/tcp"
+      - "127.0.0.1:3000:3000/tcp"
     environment:
       - UPSTREAM_DNS=172.20.0.10:5335
     depends_on:
@@ -1903,6 +1943,14 @@ rm -rf ${REPO_DIR}
 success "Panel web compilado y desplegado"
 
 # ============================================================
+# 11b. SAVE PASSWORD FILE
+# ============================================================
+log "Guardando contraseña del panel..."
+mkdir -p ${NETADMIN_DIR}/data
+echo "${PANEL_PASS}" > ${NETADMIN_DIR}/data/panel-pass.txt
+success "Contraseña guardada en ${NETADMIN_DIR}/data/panel-pass.txt"
+
+# ============================================================
 # 12. LEVANTAR TODO
 # ============================================================
 log "Construyendo imágenes y levantando servicios..."
@@ -1913,6 +1961,18 @@ docker ps -a --filter "name=netadmin-" -q | xargs -r docker rm -f 2>/dev/null ||
 
 docker compose build --quiet
 docker compose up -d --remove-orphans
+
+# Wait for containers to stabilize
+log "Esperando que los contenedores se estabilicen..."
+sleep 10
+
+# Check for failed containers
+FAILED=$(docker compose ps --status exited -q 2>/dev/null | wc -l)
+if [ "$FAILED" -gt 0 ]; then
+  warn "Algunos contenedores no arrancaron. Reintentando..."
+  docker compose up -d --remove-orphans
+  sleep 5
+fi
 
 success "¡Todos los contenedores levantados!"
 
@@ -2087,7 +2147,7 @@ echo ""
 echo -e "  ${CYAN}Todo corre en:${NC} /opt/netadmin/docker-compose.yml"
 echo ""
 echo -e "  ${CYAN}Panel Web:${NC}        http://${IP_ADDR}:${PANEL_PORT}"
-echo -e "  ${CYAN}AdGuard Home:${NC}     http://${IP_ADDR}:3000"
+echo -e "  ${CYAN}AdGuard Home:${NC}     http://localhost:3000 (solo local)"
 echo -e "  ${CYAN}Uptime Kuma:${NC}      http://${IP_ADDR}:3001"
 echo -e "  ${CYAN}Speed Test:${NC}       http://${IP_ADDR}:${PANEL_PORT}/speedtest"
 echo -e "  ${CYAN}Contraseña:${NC}       ${YELLOW}${PANEL_PASS}${NC}"
