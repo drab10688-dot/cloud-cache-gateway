@@ -806,10 +806,15 @@ export function MikroTikPanel() {
                     <td className="py-2 pr-4">Prioriza VoIP/DNS</td>
                     <td className="py-2 pr-4 text-success">Llamadas sin cortes</td>
                   </tr>
-                  <tr>
+                  <tr className="border-b border-border/50">
                     <td className="py-2 pr-4 font-mono text-primary">Simple Queues</td>
                     <td className="py-2 pr-4">Velocidad por plan</td>
                     <td className="py-2 pr-4 text-success">Cada cliente recibe lo que paga</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-4 font-mono text-destructive">Modo Stealth</td>
+                    <td className="py-2 pr-4">TTL + MSS + Conn Limit</td>
+                    <td className="py-2 pr-4 text-success">Proveedor ve 1 solo dispositivo</td>
                   </tr>
                 </tbody>
               </table>
