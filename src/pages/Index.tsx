@@ -14,10 +14,11 @@ import { NetworkPerformancePanel } from "@/components/dashboard/NetworkPerforman
 import { MikroTikPanel } from "@/components/dashboard/MikroTikPanel";
 import { SettingsPanel } from "@/components/dashboard/SettingsPanel";
 import { SpeedTestPanel } from "@/components/dashboard/SpeedTestPanel";
+import { ServerMonitorPanel } from "@/components/dashboard/ServerMonitorPanel";
 import { LoginScreen } from "@/components/dashboard/LoginScreen";
 import { isAuthenticated } from "@/lib/api";
 
-export type Section = "overview" | "ping" | "dns" | "adguard" | "cloudflare" | "kuma" | "installer" | "docker" | "dnsconfig" | "network" | "mikrotik" | "speedtest" | "settings";
+export type Section = "overview" | "ping" | "dns" | "adguard" | "cloudflare" | "kuma" | "installer" | "docker" | "dnsconfig" | "network" | "mikrotik" | "speedtest" | "monitor" | "settings";
 
 const Index = () => {
   const [loggedIn, setLoggedIn] = useState(isAuthenticated());
@@ -42,6 +43,7 @@ const Index = () => {
       case "kuma": return <UptimeKumaPanel />;
       case "installer": return <InstallerPanel />;
       case "speedtest": return <SpeedTestPanel />;
+      case "monitor": return <ServerMonitorPanel />;
       case "settings": return <SettingsPanel />;
     }
   };
