@@ -1646,6 +1646,8 @@ while true; do
 done
 CRON_ENTRY
 chmod +x ${NETADMIN_DIR}/configs/cron-entry.sh
+sed -i 's/\r$//' ${NETADMIN_DIR}/configs/update-blocklists.sh
+sed -i 's/\r$//' ${NETADMIN_DIR}/configs/cron-entry.sh
 
 # ============================================================
 # 10. DOCKER COMPOSE — TODOS LOS SERVICIOS
