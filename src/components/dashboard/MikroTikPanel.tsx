@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Router, Copy, CheckCircle, Globe, Info, Zap, AlertTriangle, Shield, Activity, Server, ArrowRight, Play, Loader2, Wifi, Settings, XCircle, Link, Power, RefreshCw } from "lucide-react";
+import { Router, Copy, CheckCircle, Globe, Info, Zap, AlertTriangle, Shield, Activity, Server, ArrowRight, Play, Loader2, Wifi, Settings, XCircle, Link, Power, RefreshCw, Eye, EyeOff, Gauge, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { mikrotikDeviceApi, getDevice, type MikroTikDevice, MikroTikApiError } from "@/lib/mikrotik-api";
