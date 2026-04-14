@@ -1158,7 +1158,6 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
   const { commands } = req.body;
   if (!commands || !Array.isArray(commands)) return res.status(400).json({ success: false, error: 'commands debe ser un array' });
 
-  const https = require('https');
   const agent = new https.Agent({ rejectUnauthorized: false });
   const authHeader = 'Basic ' + Buffer.from(\`\${config.user}:\${config.password}\`).toString('base64');
   const baseUrl = \`https://\${config.host}:\${config.port}\`;
