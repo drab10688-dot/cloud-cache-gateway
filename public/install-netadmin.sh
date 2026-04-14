@@ -329,10 +329,12 @@ users:
 ADGUARD_CONF
 # Replace placeholder with actual hash (write to temp file to avoid shell escaping)
 printf '%s' "$ADGUARD_HASH" > /tmp/_adguard_hash.tmp
-python3 << 'PYSCRIPT'
+CFG_FILE="${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml"
+python3 - "$CFG_FILE" << 'PYSCRIPT'
+import sys
+cfg = sys.argv[1]
 with open('/tmp/_adguard_hash.tmp') as f:
     h = f.read().strip()
-cfg = '${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml'
 with open(cfg) as f:
     content = f.read()
 content = content.replace('ADGUARD_HASH_PLACEHOLDER', h)
