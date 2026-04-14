@@ -1904,8 +1904,12 @@ success "Panel web compilado y desplegado"
 # ============================================================
 log "Construyendo imágenes y levantando servicios..."
 cd ${NETADMIN_DIR}
+
+# Clean any orphan containers from previous installs
+docker ps -a --filter "name=netadmin-" -q | xargs -r docker rm -f 2>/dev/null || true
+
 docker compose build --quiet
-docker compose up -d
+docker compose up -d --remove-orphans
 
 success "¡Todos los contenedores levantados!"
 
@@ -2087,7 +2091,7 @@ echo -e "  ${CYAN}Contraseña:${NC}       ${YELLOW}${PANEL_PASS}${NC}"
 echo ""
 echo -e "  ${CYAN}Caché configurada:${NC}"
 echo -e "    Squid (Video):     ${GREEN}${SQUID_CACHE_GB} GB${NC} (RAM: ${SQUID_CACHE_MEM} MB)"
-echo -e "    Lancache:          ${GREEN}${LANCACHE_CACHE_GB} GB${NC} (RAM: ${LANCACHE_CACHE_MEM} GB)"
+echo -e "    Lancache:          ${GREEN}${LANCACHE_CACHE_GB} GB${NC} (RAM: ${LANCACHE_CACHE_MEM} MB)"
 echo -e "    Nginx CDN:         ${GREEN}${NGINX_CACHE_GB} GB${NC}"
 echo -e "    Total:             ${GREEN}$((SQUID_CACHE_GB + LANCACHE_CACHE_GB + NGINX_CACHE_GB)) GB${NC}"
 echo ""
