@@ -1278,7 +1278,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
   const { commands } = req.body;
   if (!commands || !Array.isArray(commands)) return res.status(400).json({ success: false, error: 'commands debe ser un array' });
 
-  const isApiProtocol = config.version === 'v6' || [8728, 8729, 8730].includes(config.port);
+  const isApiProtocol = config.version === 'v6' || (config.port !== 443 && config.port !== 80);
   const results = [];
 
   for (const cmd of commands) {
