@@ -102,7 +102,7 @@ if [ -d "/opt/netadmin" ] && [ -f "/opt/netadmin/docker-compose.yml" ]; then
 fi
 
 # ── Modo desinstalar por flag ──
-if [ "$1" = "--uninstall" ] || [ "$1" = "uninstall" ]; then
+if [ "${1:-}" = "--uninstall" ] || [ "${1:-}" = "uninstall" ]; then
   if [ ! -d "/opt/netadmin" ]; then
     warn "NetAdmin no está instalado en este servidor."
     exit 0
