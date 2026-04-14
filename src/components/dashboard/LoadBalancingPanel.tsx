@@ -964,17 +964,25 @@ export function LoadBalancingPanel() {
     setLoadingIfaces(true);
     setIfaceError(null);
     try {
-      const result = await mikrotikDeviceApi.execute(["/interface/print"]);
-      if (result.results && Array.isArray(result.results)) {
-        const ifaces: MkInterface[] = result.results.map((r: any) => ({
-          name: r.name || r[".id"] || "unknown",
-          type: r.type || "ethernet",
-          running: r.running === "true" || r.running === true,
-          disabled: r.disabled === "true" || r.disabled === true,
-          comment: r.comment,
-        }));
-        setInterfaces(ifaces);
+      const result = await mikrotikDeviceApi.execute(["interfaces:list"]);
+      const payload = Array.isArray(result.results)
+        ? result.results.find((entry: any) => entry.cmd === "interfaces:list")
+        : null;
+
+      if (!payload?.success) {
+        throw new Error(payload?.error || result.error || "No se pudieron obtener las interfaces");
       }
+
+      const rawInterfaces = Array.isArray(payload.result) ? payload.result : [];
+      const ifaces: MkInterface[] = rawInterfaces.map((r: any) => ({
+        name: r.name || r["default-name"] || r[".id"] || "unknown",
+        type: r.type || (typeof r.name === "string" && r.name.startsWith("ether") ? "ethernet" : "unknown"),
+        running: r.running === "true" || r.running === true || r.running === "yes",
+        disabled: r.disabled === "true" || r.disabled === true || r.disabled === "yes",
+        comment: r.comment,
+      }));
+
+      setInterfaces(ifaces);
     } catch (e: any) {
       setIfaceError(e.message || "No se pudieron obtener las interfaces");
     } finally {
