@@ -479,39 +479,65 @@ export function MikroTikPanel() {
           <div className="flex items-center justify-center w-8 h-8 rounded-full bg-success text-success-foreground font-bold text-sm">5</div>
           <div>
             <h3 className="text-sm font-semibold text-foreground">Queue Tree — Control de ancho de banda</h3>
-            <p className="text-xs text-muted-foreground">Ejemplo: Link de 100Mbps con prioridades</p>
+            <p className="text-xs text-muted-foreground">Ingresa tu velocidad real y se calculan las colas automáticamente</p>
           </div>
         </div>
+
+        {/* Bandwidth input */}
+        <div className="mb-4 p-3 rounded-md bg-primary/5 border border-primary/20">
+          <label className="text-xs font-semibold text-foreground mb-2 block">Tu ancho de banda total (Mbps)</label>
+          <div className="flex items-center gap-3">
+            <Input
+              type="number"
+              min={1}
+              max={10000}
+              value={totalBandwidth}
+              onChange={e => setTotalBandwidth(Math.max(1, parseInt(e.target.value) || 1))}
+              className="h-9 w-32 text-sm font-mono"
+            />
+            <span className="text-xs text-muted-foreground">Mbps</span>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+            <div className="bg-secondary/50 rounded px-2 py-1.5 text-center">
+              <span className="text-muted-foreground">DNS:</span>{' '}
+              <strong className="text-primary">{dnsBw}M</strong>
+              <span className="text-muted-foreground ml-1">(5%)</span>
+            </div>
+            <div className="bg-secondary/50 rounded px-2 py-1.5 text-center">
+              <span className="text-muted-foreground">VoIP:</span>{' '}
+              <strong className="text-warning">{voipBw}M</strong>
+              <span className="text-muted-foreground ml-1">(10%)</span>
+            </div>
+            <div className="bg-secondary/50 rounded px-2 py-1.5 text-center">
+              <span className="text-muted-foreground">Clientes:</span>{' '}
+              <strong className="text-success">{clientBw}M</strong>
+              <span className="text-muted-foreground ml-1">(resto)</span>
+            </div>
+          </div>
+        </div>
+
         <CopyBlock
           field="queue-tree"
           code={`# Queue padre (tu ancho de banda total)
 /queue tree add name=Total-Download parent=global \\
-  max-limit=100M comment="NetAdmin: BW total download"
+  max-limit=${totalBandwidth}M comment="NetAdmin: BW total download"
 
 # Cola DNS (máxima prioridad)
 /queue tree add name=DNS-Priority parent=Total-Download \\
-  packet-mark=dns-priority priority=1 max-limit=5M \\
+  packet-mark=dns-priority priority=1 max-limit=${dnsBw}M \\
   comment="NetAdmin: DNS alta prioridad"
 
 # Cola VoIP (alta prioridad)
 /queue tree add name=VoIP-Priority parent=Total-Download \\
-  packet-mark=voip-priority priority=2 max-limit=10M \\
+  packet-mark=voip-priority priority=2 max-limit=${voipBw}M \\
   comment="NetAdmin: VoIP alta prioridad"
 
 # Cola general clientes
 /queue tree add name=Client-Traffic parent=Total-Download \\
-  packet-mark=client-packets priority=5 max-limit=90M \\
+  packet-mark=client-packets priority=5 max-limit=${clientBw}M \\
   comment="NetAdmin: Tráfico general clientes"`}
         />
         <ExecuteButton step={5} />
-        <div className="mt-3 p-2 rounded-md bg-warning/5 border border-warning/20">
-          <div className="flex items-start gap-1.5">
-            <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0 mt-0.5" />
-            <p className="text-xs text-warning">
-              Ajusta <strong>max-limit</strong> según tu ancho de banda real. El ejemplo usa 100M.
-            </p>
-          </div>
-        </div>
       </div>
 
       {/* Step 6: Per-client simple queues */}
