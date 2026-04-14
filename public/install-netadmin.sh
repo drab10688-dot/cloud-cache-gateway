@@ -640,7 +640,7 @@ const proxyAdGuard = (path, method = 'GET') => async (req, res) => {
   try {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (method === 'POST') opts.body = JSON.stringify(req.body);
-    const r = await fetch(\`\${ADGUARD_URL}\${path}\`, opts);
+    const r = await fetch(`${ADGUARD_URL}${path}`, opts);
     const contentType = r.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const text = await r.text();
@@ -650,7 +650,7 @@ const proxyAdGuard = (path, method = 'GET') => async (req, res) => {
       return res.json({});
     }
     res.json(await r.json());
-  } catch (e) { res.status(500).json({ error: \`No se pudo conectar con AdGuard Home: \${e.message}\` }); }
+  } catch (e) { res.status(500).json({ error: `No se pudo conectar con AdGuard Home: ${e.message}` }); }
 };
 
 app.get('/api/adguard/status', proxyAdGuard('/control/status'));
@@ -1149,7 +1149,7 @@ async function mkApiConnect(config) {
 // Helper: connect via REST API (v7 only, port 443/80)
 function mkRestHeaders(config) {
   return {
-    'Authorization': 'Basic ' + Buffer.from(\`\${config.user}:\${config.password}\`).toString('base64'),
+    'Authorization': 'Basic ' + Buffer.from(`${config.user}:${config.password}`).toString('base64'),
     'Content-Type': 'application/json',
   };
 }
@@ -1192,32 +1192,32 @@ app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
       return res.json({ success: true, identity: name, version });
     } catch (e) {
       if (api) try { await api.close(); } catch {}
-      return res.json({ success: false, error: \`API v6 error: \${e.message}. Verifica IP (\${config.host}), puerto (\${config.port}), usuario y contraseña. El servicio API debe estar habilitado en MikroTik (IP → Services → api).\` });
+      return res.json({ success: false, error: `API v6 error: ${e.message}. Verifica IP (${config.host}), puerto (${config.port}), usuario y contraseña. El servicio API debe estar habilitado en MikroTik (IP → Services → api).` });
     }
   }
 
   // REST API (v7)
   try {
     const agent = new https.Agent({ rejectUnauthorized: false });
-    const url = \`https://\${config.host}:\${config.port}/rest/system/identity\`;
+    const url = `https://${config.host}:${config.port}/rest/system/identity`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     const resp = await fetch(url, { headers: mkRestHeaders(config), signal: controller.signal, agent });
     clearTimeout(timeout);
     if (!resp.ok) {
       const txt = await resp.text().catch(() => '');
-      return res.json({ success: false, error: \`MikroTik respondió \${resp.status}: \${txt.slice(0, 200)}\` });
+      return res.json({ success: false, error: `MikroTik respondió ${resp.status}: ${txt.slice(0, 200)}` });
     }
     const identity = await resp.json();
     let version = config.version;
     try {
-      const vResp = await fetch(\`https://\${config.host}:\${config.port}/rest/system/resource\`, { headers: mkRestHeaders(config), agent });
+      const vResp = await fetch(`https://${config.host}:${config.port}/rest/system/resource`, { headers: mkRestHeaders(config), agent });
       if (vResp.ok) { const vData = await vResp.json(); version = vData.version || version; }
     } catch {}
     res.json({ success: true, identity: identity.name || config.host, version });
   } catch (e) {
-    if (e.name === 'AbortError') return res.json({ success: false, error: \`Timeout conectando a \${config.host}:\${config.port}\` });
-    res.json({ success: false, error: \`Error: \${e.message}. Verifica IP, puerto y REST API habilitada.\` });
+    if (e.name === 'AbortError') return res.json({ success: false, error: `Timeout conectando a ${config.host}:${config.port}` });
+    res.json({ success: false, error: `Error: ${e.message}. Verifica IP, puerto y REST API habilitada.` });
   }
 });
 
@@ -1310,7 +1310,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
     if (isApiProtocol) {
       // RouterOS API protocol
       const stepCmds = getStepCommandsV6(stepNum, serverIp);
-      if (stepCmds.length === 0) { results.push({ cmd, success: false, error: \`Paso \${stepNum} no definido\` }); continue; }
+      if (stepCmds.length === 0) { results.push({ cmd, success: false, error: `Paso ${stepNum} no definido` }); continue; }
       let api;
       try {
         api = await mkApiConnect(config);
@@ -1318,7 +1318,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
         const stepResults = [];
         for (const sc of stepCmds) {
           try {
-            const params = Object.entries(sc.params).map(([k, v]) => \`=\${k}=\${v}\`);
+            const params = Object.entries(sc.params).map(([k, v]) => `=${k}=${v}`);
             const result = await api.write(sc.path, params);
             stepResults.push({ path: sc.path, ok: true, result });
           } catch (e) {
@@ -1335,21 +1335,21 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
         results.push({ cmd, success: allOk, details: stepResults });
       } catch (e) {
         if (api) try { await api.close(); } catch {}
-        results.push({ cmd, success: false, error: \`Conexión API falló: \${e.message}\` });
+        results.push({ cmd, success: false, error: `Conexión API falló: ${e.message}` });
       }
     } else {
       // REST API v7
       const agent = new https.Agent({ rejectUnauthorized: false });
-      const baseUrl = \`https://\${config.host}:\${config.port}\`;
+      const baseUrl = `https://${config.host}:${config.port}`;
       const stepCmds = getStepCommandsV7(stepNum, serverIp);
-      if (stepCmds.length === 0) { results.push({ cmd, success: false, error: \`Paso \${stepNum} no definido\` }); continue; }
+      if (stepCmds.length === 0) { results.push({ cmd, success: false, error: `Paso ${stepNum} no definido` }); continue; }
       let allOk = true;
       const stepResults = [];
       for (const sc of stepCmds) {
         try {
           const fetchOpts = { method: sc.method, headers: mkRestHeaders(config), agent };
           if (sc.body) fetchOpts.body = JSON.stringify(sc.body);
-          const r = await fetch(\`\${baseUrl}\${sc.endpoint}\`, fetchOpts);
+          const r = await fetch(`${baseUrl}${sc.endpoint}`, fetchOpts);
           const txt = await r.text().catch(() => '');
           if (!r.ok && r.status !== 409) { allOk = false; stepResults.push({ endpoint: sc.endpoint, status: r.status, error: txt.slice(0, 200) }); }
           else { stepResults.push({ endpoint: sc.endpoint, status: r.status, ok: true }); }
@@ -1390,7 +1390,7 @@ app.post('/api/telegram/test', requireAuth, async (req, res) => {
   if (!config.botToken || !config.chatId) return res.status(400).json({ error: 'Bot Token y Chat ID requeridos' });
   try {
     const msg = '🔔 *NetAdmin* — Test de conexión exitoso\\n✅ Las alertas de Telegram están funcionando.';
-    const r = await fetch(\`https://api.telegram.org/bot\${config.botToken}/sendMessage\`, {
+    const r = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: config.chatId, text: msg, parse_mode: 'Markdown' }),
@@ -1406,7 +1406,7 @@ app.post('/api/telegram/alert', requireAuth, async (req, res) => {
   if (!config.botToken || !config.chatId || !config.enabled) return res.status(400).json({ error: 'Telegram no configurado o desactivado' });
   try {
     const { message } = req.body;
-    const r = await fetch(\`https://api.telegram.org/bot\${config.botToken}/sendMessage\`, {
+    const r = await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: config.chatId, text: message, parse_mode: 'Markdown' }),
@@ -1417,7 +1417,7 @@ app.post('/api/telegram/alert', requireAuth, async (req, res) => {
 });
 
 app.listen(API_PORT, '0.0.0.0', () => {
-  console.log(\`NetAdmin API v4.0 → http://0.0.0.0:\${API_PORT}\`);
+  console.log(`NetAdmin API v4.0 → http://0.0.0.0:${API_PORT}`);
 });
 API_JS
 
