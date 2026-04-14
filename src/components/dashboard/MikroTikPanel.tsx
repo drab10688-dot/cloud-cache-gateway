@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
-import { Router, Copy, CheckCircle, Globe, Info, Zap, AlertTriangle, Shield, Activity, Server, ArrowRight, Play, Loader2, Wifi, Settings, XCircle, Link } from "lucide-react";
+import { Router, Copy, CheckCircle, Globe, Info, Zap, AlertTriangle, Shield, Activity, Server, ArrowRight, Play, Loader2, Wifi, Settings, XCircle, Link, Power, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/api";
+import { mikrotikDeviceApi, getDevice, type MikroTikDevice, MikroTikApiError } from "@/lib/mikrotik-api";
 import { stepLabels } from "@/lib/mikrotik-commands";
 
 interface StepStatus {
@@ -15,61 +15,100 @@ export function MikroTikPanel() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const serverIp = typeof window !== "undefined" ? window.location.hostname : "IP_DEL_SERVIDOR";
 
-  // MikroTik connection
-  const [mkHost, setMkHost] = useState(() => localStorage.getItem('mk-host') || '');
-  const [mkUser, setMkUser] = useState(() => localStorage.getItem('mk-user') || 'admin');
-  const [mkPass, setMkPass] = useState(() => localStorage.getItem('mk-pass') || '');
-  const [connected, setConnected] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [connMsg, setConnMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // Connection state
+  const [mkHost, setMkHost] = useState('');
+  const [mkUser, setMkUser] = useState('admin');
+  const [mkPass, setMkPass] = useState('');
+  const [mkPort, setMkPort] = useState(443);
+  const [mkVersion, setMkVersion] = useState<'v7' | 'v6'>('v7');
+  const [device, setDevice] = useState<MikroTikDevice | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [connError, setConnError] = useState<string | null>(null);
 
-  // Step execution status
+  // Step execution
   const [stepStatus, setStepStatus] = useState<Record<number, StepStatus>>({});
 
-  const saveConfig = useCallback(async () => {
-    if (!mkHost || !mkUser) return;
-    localStorage.setItem('mk-host', mkHost);
-    localStorage.setItem('mk-user', mkUser);
-    localStorage.setItem('mk-pass', mkPass);
-    setTesting(true);
-    setConnMsg(null);
-    try {
-      await api.mikrotikConfig(mkHost, mkUser, mkPass);
-      const result = await api.mikrotikTest();
-      if (result.success) {
-        setConnected(true);
-        setConnMsg({ type: 'success', text: `Conectado a ${result.identity || mkHost} (RouterOS ${result.version || '—'})` });
-      } else {
-        setConnected(false);
-        setConnMsg({ type: 'error', text: result.error || 'No se pudo conectar' });
-      }
-    } catch {
-      setConnected(false);
-      setConnMsg({ type: 'error', text: 'Error de conexión con el backend' });
-    } finally {
-      setTesting(false);
-    }
-  }, [mkHost, mkUser, mkPass]);
-
-  // Test connection on mount if config exists
+  // Load saved device on mount
   useEffect(() => {
-    if (mkHost && mkUser) {
-      saveConfig();
+    const saved = getDevice();
+    if (saved) {
+      setDevice(saved);
+      setMkHost(saved.host);
+      setMkUser(saved.username);
+      setMkPort(saved.port);
+      setMkVersion(saved.version);
+      // Test connection silently
+      mikrotikDeviceApi.testConnection()
+        .then(result => {
+          if (result.success) {
+            setDevice(prev => prev ? { ...prev, connected: true, identity: result.identity, routeros_version: result.version } : prev);
+          } else {
+            setDevice(prev => prev ? { ...prev, connected: false } : prev);
+            setConnError('Dispositivo guardado pero no accesible. Reconecta.');
+          }
+        })
+        .catch(() => {
+          setDevice(prev => prev ? { ...prev, connected: false } : prev);
+        });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleConnect = async () => {
+    if (!mkHost) return;
+    setConnecting(true);
+    setConnError(null);
+    try {
+      const connected = await mikrotikDeviceApi.connect(mkHost, mkUser, mkPass, mkPort, mkVersion);
+      setDevice(connected);
+      setMkPass(''); // Clear password from state after connecting
+    } catch (e: any) {
+      setConnError(e instanceof MikroTikApiError ? e.message : 'Error de conexión con el backend');
+      setDevice(null);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = () => {
+    mikrotikDeviceApi.disconnect();
+    setDevice(null);
+    setStepStatus({});
+  };
+
+  const handleReconnect = async () => {
+    setConnecting(true);
+    setConnError(null);
+    try {
+      const result = await mikrotikDeviceApi.testConnection();
+      if (result.success) {
+        setDevice(prev => prev ? { ...prev, connected: true, identity: result.identity, routeros_version: result.version } : prev);
+      } else {
+        setConnError(result.error || 'No se pudo reconectar');
+        setDevice(prev => prev ? { ...prev, connected: false } : prev);
+      }
+    } catch (e: any) {
+      setConnError(e.message || 'Error de conexión');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const connected = device?.connected ?? false;
 
   const executeStep = async (step: number) => {
     setStepStatus(prev => ({ ...prev, [step]: { loading: true, result: 'idle', message: 'Ejecutando...' } }));
     try {
-      const result = await api.mikrotikExecute([`step:${step}:${serverIp}`]);
+      const result = await mikrotikDeviceApi.execute([`step:${step}:${serverIp}`]);
       if (result.success) {
         setStepStatus(prev => ({ ...prev, [step]: { loading: false, result: 'success', message: result.message || `${stepLabels[step]} aplicado correctamente` } }));
       } else {
         setStepStatus(prev => ({ ...prev, [step]: { loading: false, result: 'error', message: result.error || 'Error al ejecutar' } }));
       }
-    } catch {
-      setStepStatus(prev => ({ ...prev, [step]: { loading: false, result: 'error', message: 'Error de conexión con el backend' } }));
+    } catch (e: any) {
+      const msg = e instanceof MikroTikApiError
+        ? `${e.message}${e.status === 408 ? ' (timeout — el comando puede necesitar más tiempo)' : ''}`
+        : 'Error de conexión con el backend';
+      setStepStatus(prev => ({ ...prev, [step]: { loading: false, result: 'error', message: msg } }));
     }
   };
 
@@ -137,68 +176,113 @@ export function MikroTikPanel() {
         </p>
       </div>
 
-      {/* MikroTik Connection */}
+      {/* MikroTik Connection — Device style */}
       <div className={`card-glow rounded-lg p-5 mb-6 border-2 ${connected ? 'border-success/40' : 'border-warning/40'}`}>
         <div className="flex items-center gap-3 mb-4">
           <div className={`p-2 rounded-md ${connected ? 'bg-success/20' : 'bg-warning/20'}`}>
             <Link className={`h-5 w-5 ${connected ? 'text-success' : 'text-warning'}`} />
           </div>
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-foreground">Conexión MikroTik REST API</h3>
-            <p className="text-xs text-muted-foreground">
-              {connected ? '✓ Conectado — puedes ejecutar comandos automáticamente' : 'Configura la conexión para ejecutar comandos desde aquí'}
-            </p>
+            <h3 className="text-sm font-semibold text-foreground">Conexión MikroTik</h3>
+            {connected && device ? (
+              <p className="text-xs text-success">
+                ✓ {device.identity || device.host} — RouterOS {device.routeros_version || device.version} — Puerto {device.port}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">Configura la conexión para ejecutar comandos automáticamente</p>
+            )}
           </div>
           {connected && (
-            <div className="flex items-center gap-1.5">
-              <div className="status-dot-online" />
-              <span className="text-xs text-success font-mono">Online</span>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={handleReconnect} disabled={connecting} className="gap-1.5 h-8 text-xs">
+                <RefreshCw className={`h-3.5 w-3.5 ${connecting ? 'animate-spin' : ''}`} />
+                Test
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleDisconnect} className="gap-1.5 h-8 text-xs text-destructive hover:text-destructive">
+                <Power className="h-3.5 w-3.5" />
+                Desconectar
+              </Button>
             </div>
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">IP / Hostname</label>
-            <Input
-              placeholder="192.168.88.1"
-              value={mkHost}
-              onChange={e => setMkHost(e.target.value)}
-              className="h-9 text-sm font-mono"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Usuario</label>
-            <Input
-              placeholder="admin"
-              value={mkUser}
-              onChange={e => setMkUser(e.target.value)}
-              className="h-9 text-sm font-mono"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Contraseña</label>
-            <Input
-              type="password"
-              placeholder="••••••••"
-              value={mkPass}
-              onChange={e => setMkPass(e.target.value)}
-              className="h-9 text-sm font-mono"
-            />
-          </div>
-          <div className="flex items-end">
-            <Button onClick={saveConfig} disabled={testing || !mkHost} className="gap-2 w-full h-9">
-              {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Router className="h-4 w-4" />}
-              {testing ? 'Probando...' : 'Conectar'}
-            </Button>
-          </div>
-        </div>
+        {!connected && (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">IP / Hostname</label>
+                <Input
+                  placeholder="192.168.88.1"
+                  value={mkHost}
+                  onChange={e => setMkHost(e.target.value)}
+                  className="h-9 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Usuario</label>
+                <Input
+                  placeholder="admin"
+                  value={mkUser}
+                  onChange={e => setMkUser(e.target.value)}
+                  className="h-9 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Contraseña</label>
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={mkPass}
+                  onChange={e => setMkPass(e.target.value)}
+                  className="h-9 text-sm font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Puerto API</label>
+                <Input
+                  type="number"
+                  placeholder="443"
+                  value={mkPort}
+                  onChange={e => setMkPort(parseInt(e.target.value) || 443)}
+                  className="h-9 text-sm font-mono"
+                />
+              </div>
+              <div className="flex items-end">
+                <Button onClick={handleConnect} disabled={connecting || !mkHost} className="gap-2 w-full h-9">
+                  {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Router className="h-4 w-4" />}
+                  {connecting ? 'Conectando...' : 'Conectar'}
+                </Button>
+              </div>
+            </div>
 
-        {connMsg && (
-          <div className={`mt-3 p-2 rounded-md ${connMsg.type === 'success' ? 'bg-success/5 border border-success/20' : 'bg-destructive/5 border border-destructive/20'}`}>
-            <p className={`text-xs flex items-center gap-1.5 ${connMsg.type === 'success' ? 'text-success' : 'text-destructive'}`}>
-              {connMsg.type === 'success' ? <CheckCircle className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-              {connMsg.text}
+            <div className="mt-3 flex items-center gap-4">
+              <label className="text-xs text-muted-foreground flex items-center gap-2">
+                <input
+                  type="radio"
+                  checked={mkVersion === 'v7'}
+                  onChange={() => setMkVersion('v7')}
+                  className="accent-primary"
+                />
+                RouterOS v7 (REST API)
+              </label>
+              <label className="text-xs text-muted-foreground flex items-center gap-2">
+                <input
+                  type="radio"
+                  checked={mkVersion === 'v6'}
+                  onChange={() => setMkVersion('v6')}
+                  className="accent-primary"
+                />
+                RouterOS v6 (API Legacy)
+              </label>
+            </div>
+          </>
+        )}
+
+        {connError && (
+          <div className="mt-3 p-2 rounded-md bg-destructive/5 border border-destructive/20">
+            <p className="text-xs text-destructive flex items-center gap-1.5">
+              <XCircle className="h-3.5 w-3.5" />
+              {connError}
             </p>
           </div>
         )}
@@ -206,7 +290,11 @@ export function MikroTikPanel() {
         <div className="mt-3 p-2 rounded-md bg-primary/5 border border-primary/20">
           <p className="text-xs text-muted-foreground flex items-start gap-1.5">
             <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
-            <span>Requiere <strong className="text-foreground">RouterOS v7+</strong> con REST API habilitada. El usuario debe tener permisos de escritura (full o policy: write, api, read).</span>
+            <span>
+              La conexión pasa por tu <strong className="text-foreground">VPS backend</strong> → MikroTik.
+              Puerto común: <strong className="text-foreground">443</strong> (HTTPS REST), <strong className="text-foreground">8728</strong> (API), <strong className="text-foreground">80</strong> (HTTP).
+              El usuario necesita permisos <strong className="text-foreground">full</strong> o policy: write, api, read.
+            </span>
           </p>
         </div>
       </div>
@@ -343,7 +431,7 @@ export function MikroTikPanel() {
         </div>
       </div>
 
-      {/* Step 4: Mangle - Mark traffic */}
+      {/* Step 4: Mangle */}
       <div className="card-glow rounded-lg p-5 mb-4 border-l-4 border-l-success">
         <div className="flex items-center gap-3 mb-3">
           <div className="flex items-center justify-center w-8 h-8 rounded-full bg-success text-success-foreground font-bold text-sm">4</div>
