@@ -1923,6 +1923,14 @@ rm -rf ${REPO_DIR}
 success "Panel web compilado y desplegado"
 
 # ============================================================
+# 11b. SAVE PASSWORD FILE
+# ============================================================
+log "Guardando contraseña del panel..."
+mkdir -p ${NETADMIN_DIR}/data
+echo "${PANEL_PASS}" > ${NETADMIN_DIR}/data/panel-pass.txt
+success "Contraseña guardada en ${NETADMIN_DIR}/data/panel-pass.txt"
+
+# ============================================================
 # 12. LEVANTAR TODO
 # ============================================================
 log "Construyendo imágenes y levantando servicios..."
@@ -1933,6 +1941,18 @@ docker ps -a --filter "name=netadmin-" -q | xargs -r docker rm -f 2>/dev/null ||
 
 docker compose build --quiet
 docker compose up -d --remove-orphans
+
+# Wait for containers to stabilize
+log "Esperando que los contenedores se estabilicen..."
+sleep 10
+
+# Check for failed containers
+FAILED=$(docker compose ps --status exited -q 2>/dev/null | wc -l)
+if [ "$FAILED" -gt 0 ]; then
+  warn "Algunos contenedores no arrancaron. Reintentando..."
+  docker compose up -d --remove-orphans
+  sleep 5
+fi
 
 success "¡Todos los contenedores levantados!"
 
