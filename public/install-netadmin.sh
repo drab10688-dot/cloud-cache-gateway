@@ -438,7 +438,8 @@ cat > ${NETADMIN_DIR}/api/package.json << 'PKG'
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "dockerode": "^4.0.0"
+    "dockerode": "^4.0.0",
+    "node-routeros": "^1.6.9"
   }
 }
 PKG
