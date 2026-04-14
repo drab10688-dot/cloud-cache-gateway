@@ -574,7 +574,88 @@ export function MikroTikPanel() {
         <ExecuteButton step={6} />
       </div>
 
-      {/* How it works together */}
+      {/* Step 7: TCP MSS Clamping */}
+      <div className="card-glow rounded-lg p-5 mb-4 border-l-4 border-l-warning">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-warning text-warning-foreground font-bold text-sm">7</div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">TCP MSS Clamping — Evitar fragmentación PPPoE</h3>
+            <p className="text-xs text-muted-foreground">Elimina páginas que cargan a medias o se quedan en blanco en conexiones PPPoE</p>
+          </div>
+        </div>
+        <CopyBlock
+          field="mss-clamping"
+          code={`# Clamp MSS para tráfico PPPoE (evita fragmentación)
+/ip firewall mangle add chain=forward protocol=tcp \\
+  tcp-flags=syn action=change-mss \\
+  new-mss=clamp-to-pmtu passthrough=yes \\
+  comment="NetAdmin: MSS Clamp forward"
+
+/ip firewall mangle add chain=postrouting protocol=tcp \\
+  tcp-flags=syn action=change-mss \\
+  new-mss=clamp-to-pmtu passthrough=yes \\
+  comment="NetAdmin: MSS Clamp postrouting"
+
+# Verificar MTU en interfaces PPPoE
+/interface pppoe-server server print
+# Si el MTU no es 1480, ajustar:
+# /interface pppoe-server server set [find] mrru=1480`}
+        />
+        <ExecuteButton step={7} />
+        <div className="mt-3 p-2 rounded-md bg-primary/5 border border-primary/20">
+          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+            <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-foreground">clamp-to-pmtu</strong> ajusta automáticamente el MSS según el Path MTU.
+              Esto es mejor que fijar un valor manual porque se adapta a cualquier tipo de enlace.
+            </span>
+          </p>
+        </div>
+      </div>
+
+      {/* Step 8: Connection Tracking Tuning */}
+      <div className="card-glow rounded-lg p-5 mb-4 border-l-4 border-l-warning">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-warning text-warning-foreground font-bold text-sm">8</div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Connection Tracking — Optimizar tabla de conexiones</h3>
+            <p className="text-xs text-muted-foreground">Libera memoria del router reduciendo timeouts de conexiones inactivas</p>
+          </div>
+        </div>
+        <CopyBlock
+          field="conntrack-tuning"
+          code={`# Reducir timeouts para liberar conntrack más rápido
+/ip firewall connection tracking set \\
+  udp-timeout=30s \\
+  udp-stream-timeout=120s \\
+  icmp-timeout=10s \\
+  generic-timeout=120s \\
+  tcp-close-timeout=10s \\
+  tcp-close-wait-timeout=10s \\
+  tcp-fin-wait-timeout=10s \\
+  tcp-last-ack-timeout=10s \\
+  tcp-time-wait-timeout=10s \\
+  tcp-syn-sent-timeout=30s \\
+  tcp-syn-received-timeout=10s \\
+  tcp-established-timeout=7200s
+
+# Verificar estado actual de la tabla
+/ip firewall connection tracking print
+/ip firewall connection print count-only`}
+        />
+        <ExecuteButton step={8} />
+        <div className="mt-3 p-2 rounded-md bg-success/5 border border-success/20">
+          <p className="text-xs text-success flex items-start gap-1.5">
+            <CheckCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span>
+              <strong>tcp-established=7200s</strong> (2h) mantiene conexiones activas estables.
+              Los demás timeouts reducidos liberan entradas inactivas rápidamente.
+            </span>
+          </p>
+        </div>
+      </div>
+
+
       <div className="card-glow rounded-lg p-5 mb-4">
         <div className="flex items-start gap-3">
           <Info className="h-5 w-5 text-primary shrink-0 mt-0.5" />

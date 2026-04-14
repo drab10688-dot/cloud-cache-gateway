@@ -46,6 +46,15 @@ export function getStepCommands(step: number, serverIp: string, totalBw: number 
       return [
         { method: 'PUT', endpoint: '/rest/ppp/profile', body: { name: 'plan-10mbps', 'rate-limit': '10M/10M', 'dns-server': serverIp, comment: 'NetAdmin: Plan 10Mbps' } },
       ];
+    case 7: // MSS Clamping
+      return [
+        { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'forward', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': 'clamp-to-pmtu', passthrough: 'yes', comment: 'NetAdmin: MSS Clamp forward' } },
+        { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': 'clamp-to-pmtu', passthrough: 'yes', comment: 'NetAdmin: MSS Clamp postrouting' } },
+      ];
+    case 8: // Connection Tracking Tuning
+      return [
+        { method: 'POST', endpoint: '/rest/ip/firewall/connection/tracking/set', body: { 'udp-timeout': '30s', 'udp-stream-timeout': '120s', 'icmp-timeout': '10s', 'generic-timeout': '120s', 'tcp-close-timeout': '10s', 'tcp-close-wait-timeout': '10s', 'tcp-fin-wait-timeout': '10s', 'tcp-last-ack-timeout': '10s', 'tcp-time-wait-timeout': '10s', 'tcp-syn-sent-timeout': '30s', 'tcp-syn-received-timeout': '10s', 'tcp-established-timeout': '7200s' } },
+      ];
     default:
       return [];
   }
@@ -58,4 +67,6 @@ export const stepLabels: Record<number, string> = {
   4: 'Crear reglas Mangle',
   5: 'Crear Queue Tree',
   6: 'Crear perfil PPPoE',
+  7: 'MSS Clamping',
+  8: 'Connection Tracking',
 };
