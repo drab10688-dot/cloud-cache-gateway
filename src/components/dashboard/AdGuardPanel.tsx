@@ -97,6 +97,9 @@ export function AdGuardPanel() {
         </Button>
       </div>
 
+      {/* Unbound upstream config banner */}
+      <UnboundConfigBanner />
+
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
