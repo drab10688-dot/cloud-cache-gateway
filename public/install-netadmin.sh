@@ -237,7 +237,7 @@ echo ""
 # ============================================================
 log "Instalando Docker..."
 apt-get update -qq
-apt-get install -y -qq curl wget jq openssl ca-certificates gnupg lsb-release
+apt-get install -y -qq curl wget jq openssl ca-certificates gnupg lsb-release apache2-utils
 
 if ! command -v docker &>/dev/null; then
   curl -fsSL https://get.docker.com | sh
@@ -315,10 +315,21 @@ EOF
 log "Configurando AdGuard Home con Unbound como upstream..."
 mkdir -p ${NETADMIN_DIR}/data/adguard/conf
 
+# Generate bcrypt hash for AdGuard admin user
+ADGUARD_HASH=$(htpasswd -bnBC 10 "" "${PANEL_PASS}" | tr -d ':\n' | sed 's/$2y/$2a/')
+
 cat > ${NETADMIN_DIR}/data/adguard/conf/AdGuardHome.yaml << ADGUARD_CONF
+schema_version: 28
 bind_host: 0.0.0.0
 bind_port: 3000
-users: []
+users:
+  - name: admin
+    password: ${ADGUARD_HASH}
+auth_attempts: 5
+block_auth_min: 15
+http_proxy: ""
+language: es
+theme: auto
 dns:
   bind_hosts:
     - 0.0.0.0
@@ -338,7 +349,8 @@ dns:
   protection_enabled: true
   filtering_enabled: true
   parental_enabled: false
-  safesearch_enabled: false
+  safesearch:
+    enabled: false
   safebrowsing_enabled: true
 filters:
   - enabled: true
@@ -608,9 +620,17 @@ const proxyAdGuard = (path, method = 'GET') => async (req, res) => {
   try {
     const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (method === 'POST') opts.body = JSON.stringify(req.body);
-    const r = await fetch(`${ADGUARD_URL}${path}`, opts);
+    const r = await fetch(\`\${ADGUARD_URL}\${path}\`, opts);
+    const contentType = r.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await r.text();
+      if (text.includes('<html') || text.includes('<!DOCTYPE')) {
+        return res.status(502).json({ error: 'AdGuard Home está en modo setup o no responde JSON. Accede a http://IP:3000 para completar la configuración inicial.' });
+      }
+      return res.json({});
+    }
     res.json(await r.json());
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(500).json({ error: \`No se pudo conectar con AdGuard Home: \${e.message}\` }); }
 };
 
 app.get('/api/adguard/status', proxyAdGuard('/control/status'));
