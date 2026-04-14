@@ -324,8 +324,8 @@ dns:
     - 0.0.0.0
   port: 53
   upstream_dns:
-    - 127.0.0.1:5335
-  bootstrap_dns:
+    - 172.20.0.10:5335
+  fallback_dns:
     - 9.9.9.10
     - 149.112.112.10
   all_servers: false
@@ -355,7 +355,7 @@ filters:
     id: 3
 ADGUARD_CONF
 
-success "AdGuard Home configurado → Unbound 127.0.0.1:5335"
+success "AdGuard Home configurado → Unbound 172.20.0.10:5335"
 
 # ============================================================
 # 4. CONFIGURACIÓN SQUID SSL BUMP
@@ -403,7 +403,6 @@ http_access deny all
 
 access_log stdio:/var/log/squid/access.log squid
 cache_log stdio:/var/log/squid/cache.log
-visible_hostname netadmin-proxy
 visible_hostname netadmin-proxy
 SQUID_CONF
 
