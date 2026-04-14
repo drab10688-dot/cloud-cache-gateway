@@ -1091,12 +1091,33 @@ function getMkConfig() {
   catch { return null; }
 }
 
+// Helper: connect via RouterOS API (v6/v7 API protocol, port 8728/8729)
+async function mkApiConnect(config) {
+  const api = new RouterOSAPI({
+    host: config.host,
+    port: config.port || 8728,
+    user: config.user,
+    password: config.password,
+    timeout: 15,
+  });
+  await api.connect();
+  return api;
+}
+
+// Helper: connect via REST API (v7 only, port 443/80)
+function mkRestHeaders(config) {
+  return {
+    'Authorization': 'Basic ' + Buffer.from(\`\${config.user}:\${config.password}\`).toString('base64'),
+    'Content-Type': 'application/json',
+  };
+}
+
 // Save MikroTik connection config
 app.post('/api/mikrotik/config', requireAuth, (req, res) => {
   try {
     const { host, user, password, port, version } = req.body;
     if (!host || !user) return res.status(400).json({ error: 'host y user son requeridos' });
-    const config = { host, user, password, port: port || 443, version: version || 'v7', updated: new Date().toISOString() };
+    const config = { host, user, password, port: port || (version === 'v6' ? 8728 : 443), version: version || 'v7', updated: new Date().toISOString() };
     fs.writeFileSync(MK_CONFIG_FILE, JSON.stringify(config, null, 2));
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1110,113 +1131,90 @@ app.get('/api/mikrotik/config', requireAuth, (req, res) => {
   res.json(safe);
 });
 
-// Test MikroTik connection
+// Test MikroTik connection — supports both v6 API and v7 REST
 app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
   const config = getMkConfig();
   if (!config) return res.status(400).json({ success: false, error: 'No hay configuración MikroTik guardada. Configura primero.' });
+
+  // RouterOS API protocol (v6 or v7 API port)
+  if (config.version === 'v6' || config.port === 8728 || config.port === 8729) {
+    let api;
+    try {
+      api = await mkApiConnect(config);
+      const identity = await api.write('/system/identity/print');
+      const resource = await api.write('/system/resource/print');
+      const name = identity.length > 0 ? identity[0].name : config.host;
+      const version = resource.length > 0 ? resource[0].version : 'v6';
+      await api.close();
+      return res.json({ success: true, identity: name, version });
+    } catch (e) {
+      if (api) try { await api.close(); } catch {}
+      return res.json({ success: false, error: \`API v6 error: \${e.message}. Verifica IP (\${config.host}), puerto (\${config.port}), usuario y contraseña. El servicio API debe estar habilitado en MikroTik (IP → Services → api).\` });
+    }
+  }
+
+  // REST API (v7)
   try {
     const agent = new https.Agent({ rejectUnauthorized: false });
-    const url = `https://${config.host}:${config.port}/rest/system/identity`;
     const url = \`https://\${config.host}:\${config.port}/rest/system/identity\`;
-    const authHeader = 'Basic ' + Buffer.from(\`\${config.user}:\${config.password}\`).toString('base64');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
-    const resp = await fetch(url, {
-      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      agent,
-    });
+    const resp = await fetch(url, { headers: mkRestHeaders(config), signal: controller.signal, agent });
     clearTimeout(timeout);
     if (!resp.ok) {
       const txt = await resp.text().catch(() => '');
       return res.json({ success: false, error: \`MikroTik respondió \${resp.status}: \${txt.slice(0, 200)}\` });
     }
     const identity = await resp.json();
-    // Also try to get version
     let version = config.version;
     try {
-      const vResp = await fetch(\`https://\${config.host}:\${config.port}/rest/system/resource\`, {
-        headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-        agent,
-      });
-      if (vResp.ok) {
-        const vData = await vResp.json();
-        version = vData.version || version;
-      }
+      const vResp = await fetch(\`https://\${config.host}:\${config.port}/rest/system/resource\`, { headers: mkRestHeaders(config), agent });
+      if (vResp.ok) { const vData = await vResp.json(); version = vData.version || version; }
     } catch {}
-    res.json({ success: true, identity: identity.name || identity['.id'] || config.host, version });
+    res.json({ success: true, identity: identity.name || config.host, version });
   } catch (e) {
-    if (e.name === 'AbortError') {
-      return res.json({ success: false, error: \`Timeout: no se pudo conectar a \${config.host}:\${config.port} en 15s. Verifica IP, puerto y que la REST API esté habilitada en MikroTik.\` });
-    }
-    res.json({ success: false, error: \`Error de conexión: \${e.message}. Verifica que el MikroTik sea accesible desde este VPS y tenga REST API habilitada (RouterOS v7+).\` });
+    if (e.name === 'AbortError') return res.json({ success: false, error: \`Timeout conectando a \${config.host}:\${config.port}\` });
+    res.json({ success: false, error: \`Error: \${e.message}. Verifica IP, puerto y REST API habilitada.\` });
   }
 });
 
-// Execute commands on MikroTik
-app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
-  const config = getMkConfig();
-  if (!config) return res.status(400).json({ success: false, error: 'No hay configuración MikroTik guardada' });
-  const { commands } = req.body;
-  if (!commands || !Array.isArray(commands)) return res.status(400).json({ success: false, error: 'commands debe ser un array' });
-
-  const agent = new https.Agent({ rejectUnauthorized: false });
-  const authHeader = 'Basic ' + Buffer.from(\`\${config.user}:\${config.password}\`).toString('base64');
-  const baseUrl = \`https://\${config.host}:\${config.port}\`;
-  const results = [];
-
-  for (const cmd of commands) {
-    // Parse step commands: "step:N:serverIp"
-    if (cmd.startsWith('step:')) {
-      const parts = cmd.split(':');
-      const stepNum = parseInt(parts[1]);
-      const serverIp = parts[2] || config.host;
-
-      // Import step definitions inline
-      const stepCommands = getStepCommandsBackend(stepNum, serverIp);
-      if (stepCommands.length === 0) {
-        results.push({ cmd, success: false, error: \`Paso \${stepNum} no tiene comandos definidos\` });
-        continue;
-      }
-
-      let allOk = true;
-      const stepResults = [];
-      for (const sc of stepCommands) {
-        try {
-          const url = \`\${baseUrl}\${sc.endpoint}\`;
-          const fetchOpts = {
-            method: sc.method,
-            headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-            agent,
-          };
-          if (sc.body) fetchOpts.body = JSON.stringify(sc.body);
-          const r = await fetch(url, fetchOpts);
-          const txt = await r.text().catch(() => '');
-          if (!r.ok && r.status !== 409) { // 409 = already exists, OK
-            allOk = false;
-            stepResults.push({ endpoint: sc.endpoint, status: r.status, error: txt.slice(0, 200) });
-          } else {
-            stepResults.push({ endpoint: sc.endpoint, status: r.status, ok: true });
-          }
-        } catch (e) {
-          allOk = false;
-          stepResults.push({ endpoint: sc.endpoint, error: e.message });
-        }
-      }
-      results.push({ cmd, success: allOk, details: stepResults });
-    }
+// Step commands for API protocol (v6 compatible — uses CLI-style paths)
+function getStepCommandsV6(step, serverIp) {
+  switch (step) {
+    case 1: return [
+      { path: '/ip/dns/set', params: { servers: serverIp, 'allow-remote-requests': 'yes' } },
+      { path: '/ip/firewall/nat/add', params: { chain: 'dstnat', protocol: 'tcp', 'dst-port': '53', action: 'dst-nat', 'to-addresses': serverIp, 'to-ports': '53', comment: 'NetAdmin: Forzar DNS TCP' } },
+      { path: '/ip/firewall/nat/add', params: { chain: 'dstnat', protocol: 'udp', 'dst-port': '53', action: 'dst-nat', 'to-addresses': serverIp, 'to-ports': '53', comment: 'NetAdmin: Forzar DNS UDP' } },
+    ];
+    case 2: return [
+      { path: '/ip/dhcp-server/network/set', params: { numbers: '0', 'dns-server': serverIp } },
+      { path: '/ppp/profile/set', params: { numbers: 'default', 'dns-server': serverIp } },
+    ];
+    case 3: return [
+      { path: '/ip/firewall/filter/add', params: { chain: 'forward', protocol: 'udp', 'dst-port': '443', action: 'drop', comment: 'NetAdmin: Bloquear QUIC' } },
+      { path: '/ip/firewall/filter/add', params: { chain: 'forward', protocol: 'udp', 'dst-port': '80', action: 'drop', comment: 'NetAdmin: Bloquear HTTP/3' } },
+    ];
+    case 4: return [
+      { path: '/ip/firewall/mangle/add', params: { chain: 'forward', 'connection-mark': 'no-mark', action: 'mark-connection', 'new-connection-mark': 'client-traffic', passthrough: 'yes', comment: 'NetAdmin: Marcar tráfico' } },
+      { path: '/ip/firewall/mangle/add', params: { chain: 'forward', 'connection-mark': 'client-traffic', action: 'mark-packet', 'new-packet-mark': 'client-packets', passthrough: 'no', comment: 'NetAdmin: Paquetes clientes' } },
+      { path: '/ip/firewall/mangle/add', params: { chain: 'forward', protocol: 'udp', 'dst-port': '53', action: 'mark-packet', 'new-packet-mark': 'dns-priority', passthrough: 'no', comment: 'NetAdmin: DNS prioridad' } },
+      { path: '/ip/firewall/mangle/add', params: { chain: 'forward', protocol: 'udp', 'dst-port': '5060-5061', action: 'mark-packet', 'new-packet-mark': 'voip-priority', passthrough: 'no', comment: 'NetAdmin: VoIP prioridad' } },
+    ];
+    case 5: return [
+      { path: '/queue/tree/add', params: { name: 'Total-Download', parent: 'global', 'max-limit': '100M', comment: 'NetAdmin: BW total' } },
+      { path: '/queue/tree/add', params: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': '5M' } },
+      { path: '/queue/tree/add', params: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': '10M' } },
+      { path: '/queue/tree/add', params: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': '90M' } },
+    ];
+    case 6: return [
+      { path: '/ppp/profile/add', params: { name: 'plan-10mbps', 'rate-limit': '10M/10M', 'dns-server': serverIp, comment: 'NetAdmin: Plan 10Mbps' } },
+    ];
+    default: return [];
   }
+}
 
-  const allSuccess = results.every(r => r.success);
-  res.json({
-    success: allSuccess,
-    message: allSuccess ? 'Todos los comandos ejecutados correctamente' : 'Algunos comandos fallaron',
-    results,
-  });
-});
-
-// Step command definitions (mirror of frontend mikrotik-commands.ts)
-function getStepCommandsBackend(step, serverIp) {
+// Step commands for REST API (v7)
+function getStepCommandsV7(step, serverIp) {
   switch (step) {
     case 1: return [
       { method: 'POST', endpoint: '/rest/ip/dns/set', body: { servers: serverIp, 'allow-remote-requests': 'yes' } },
@@ -1229,7 +1227,7 @@ function getStepCommandsBackend(step, serverIp) {
     ];
     case 3: return [
       { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'dst-port': '443', action: 'drop', comment: 'NetAdmin: Bloquear QUIC' } },
-      { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'dst-port': '80', action: 'drop', comment: 'NetAdmin: Bloquear HTTP/3 alt' } },
+      { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'dst-port': '80', action: 'drop', comment: 'NetAdmin: Bloquear HTTP/3' } },
     ];
     case 4: return [
       { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'forward', 'connection-mark': 'no-mark', action: 'mark-connection', 'new-connection-mark': 'client-traffic', passthrough: 'yes', comment: 'NetAdmin: Marcar tráfico' } },
@@ -1239,9 +1237,9 @@ function getStepCommandsBackend(step, serverIp) {
     ];
     case 5: return [
       { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Total-Download', parent: 'global', 'max-limit': '100M', comment: 'NetAdmin: BW total' } },
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': '5M', comment: 'NetAdmin: DNS prioridad' } },
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': '10M', comment: 'NetAdmin: VoIP prioridad' } },
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': '90M', comment: 'NetAdmin: Tráfico clientes' } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': '5M' } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': '10M' } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': '90M' } },
     ];
     case 6: return [
       { method: 'PUT', endpoint: '/rest/ppp/profile', body: { name: 'plan-10mbps', 'rate-limit': '10M/10M', 'dns-server': serverIp, comment: 'NetAdmin: Plan 10Mbps' } },
@@ -1249,6 +1247,78 @@ function getStepCommandsBackend(step, serverIp) {
     default: return [];
   }
 }
+
+// Execute commands on MikroTik — dual v6/v7
+app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
+  const config = getMkConfig();
+  if (!config) return res.status(400).json({ success: false, error: 'No hay configuración MikroTik guardada' });
+  const { commands } = req.body;
+  if (!commands || !Array.isArray(commands)) return res.status(400).json({ success: false, error: 'commands debe ser un array' });
+
+  const isApiProtocol = config.version === 'v6' || config.port === 8728 || config.port === 8729;
+  const results = [];
+
+  for (const cmd of commands) {
+    if (!cmd.startsWith('step:')) continue;
+    const parts = cmd.split(':');
+    const stepNum = parseInt(parts[1]);
+    const serverIp = parts[2] || config.host;
+
+    if (isApiProtocol) {
+      // RouterOS API protocol
+      const stepCmds = getStepCommandsV6(stepNum, serverIp);
+      if (stepCmds.length === 0) { results.push({ cmd, success: false, error: \`Paso \${stepNum} no definido\` }); continue; }
+      let api;
+      try {
+        api = await mkApiConnect(config);
+        let allOk = true;
+        const stepResults = [];
+        for (const sc of stepCmds) {
+          try {
+            const params = Object.entries(sc.params).map(([k, v]) => \`=\${k}=\${v}\`);
+            const result = await api.write(sc.path, params);
+            stepResults.push({ path: sc.path, ok: true, result });
+          } catch (e) {
+            // "already have" errors are OK
+            if (e.message && (e.message.includes('already') || e.message.includes('failure: already'))) {
+              stepResults.push({ path: sc.path, ok: true, note: 'Ya existe' });
+            } else {
+              allOk = false;
+              stepResults.push({ path: sc.path, error: e.message });
+            }
+          }
+        }
+        await api.close();
+        results.push({ cmd, success: allOk, details: stepResults });
+      } catch (e) {
+        if (api) try { await api.close(); } catch {}
+        results.push({ cmd, success: false, error: \`Conexión API falló: \${e.message}\` });
+      }
+    } else {
+      // REST API v7
+      const agent = new https.Agent({ rejectUnauthorized: false });
+      const baseUrl = \`https://\${config.host}:\${config.port}\`;
+      const stepCmds = getStepCommandsV7(stepNum, serverIp);
+      if (stepCmds.length === 0) { results.push({ cmd, success: false, error: \`Paso \${stepNum} no definido\` }); continue; }
+      let allOk = true;
+      const stepResults = [];
+      for (const sc of stepCmds) {
+        try {
+          const fetchOpts = { method: sc.method, headers: mkRestHeaders(config), agent };
+          if (sc.body) fetchOpts.body = JSON.stringify(sc.body);
+          const r = await fetch(\`\${baseUrl}\${sc.endpoint}\`, fetchOpts);
+          const txt = await r.text().catch(() => '');
+          if (!r.ok && r.status !== 409) { allOk = false; stepResults.push({ endpoint: sc.endpoint, status: r.status, error: txt.slice(0, 200) }); }
+          else { stepResults.push({ endpoint: sc.endpoint, status: r.status, ok: true }); }
+        } catch (e) { allOk = false; stepResults.push({ endpoint: sc.endpoint, error: e.message }); }
+      }
+      results.push({ cmd, success: allOk, details: stepResults });
+    }
+  }
+
+  const allSuccess = results.every(r => r.success);
+  res.json({ success: allSuccess, message: allSuccess ? 'Comandos ejecutados correctamente' : 'Algunos comandos fallaron', results });
+});
 
 app.listen(API_PORT, '0.0.0.0', () => {
   console.log(\`NetAdmin API v4.0 → http://0.0.0.0:\${API_PORT}\`);
