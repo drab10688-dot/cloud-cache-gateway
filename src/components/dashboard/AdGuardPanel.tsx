@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Shield, Globe, Ban, Clock, Search, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { Shield, Globe, Ban, Clock, Search, RefreshCw, Loader2, AlertTriangle, Info, ExternalLink, Copy, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useApi } from "@/hooks/use-api";
