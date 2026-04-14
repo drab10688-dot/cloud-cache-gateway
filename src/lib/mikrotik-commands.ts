@@ -7,7 +7,10 @@ export interface MikroTikCommand {
   body?: Record<string, unknown>;
 }
 
-export function getStepCommands(step: number, serverIp: string): MikroTikCommand[] {
+export function getStepCommands(step: number, serverIp: string, totalBw: number = 100): MikroTikCommand[] {
+  const dnsBw = Math.max(1, Math.round(totalBw * 0.05));
+  const voipBw = Math.max(1, Math.round(totalBw * 0.10));
+  const clientBw = Math.max(1, totalBw - dnsBw - voipBw);
   switch (step) {
     case 1: // DNS
       return [
