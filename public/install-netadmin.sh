@@ -1322,6 +1322,59 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
   res.json({ success: allSuccess, message: allSuccess ? 'Comandos ejecutados correctamente' : 'Algunos comandos fallaron', results });
 });
 
+// === TELEGRAM ALERTS ===
+const TELEGRAM_CONFIG_FILE = '/data/tunnel/telegram-config.json';
+
+function getTelegramConfig() {
+  try { return JSON.parse(fs.readFileSync(TELEGRAM_CONFIG_FILE, 'utf8')); }
+  catch { return { botToken: '', chatId: '', enabled: false }; }
+}
+
+app.get('/api/telegram/config', requireAuth, (req, res) => {
+  const config = getTelegramConfig();
+  res.json({ chatId: config.chatId || '', enabled: !!config.enabled, configured: !!(config.botToken && config.chatId) });
+});
+
+app.post('/api/telegram/config', requireAuth, (req, res) => {
+  try {
+    const { botToken, chatId, enabled } = req.body;
+    const config = { botToken: botToken || '', chatId: chatId || '', enabled: !!enabled, updated: new Date().toISOString() };
+    fs.writeFileSync(TELEGRAM_CONFIG_FILE, JSON.stringify(config, null, 2));
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/telegram/test', requireAuth, async (req, res) => {
+  const config = getTelegramConfig();
+  if (!config.botToken || !config.chatId) return res.status(400).json({ error: 'Bot Token y Chat ID requeridos' });
+  try {
+    const msg = '🔔 *NetAdmin* — Test de conexión exitoso\\n✅ Las alertas de Telegram están funcionando.';
+    const r = await fetch(\`https://api.telegram.org/bot\${config.botToken}/sendMessage\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: config.chatId, text: msg, parse_mode: 'Markdown' }),
+    });
+    const data = await r.json();
+    if (data.ok) res.json({ success: true });
+    else res.json({ success: false, error: data.description || 'Error de Telegram' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/telegram/alert', requireAuth, async (req, res) => {
+  const config = getTelegramConfig();
+  if (!config.botToken || !config.chatId || !config.enabled) return res.status(400).json({ error: 'Telegram no configurado o desactivado' });
+  try {
+    const { message } = req.body;
+    const r = await fetch(\`https://api.telegram.org/bot\${config.botToken}/sendMessage\`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: config.chatId, text: message, parse_mode: 'Markdown' }),
+    });
+    const data = await r.json();
+    res.json({ success: data.ok });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.listen(API_PORT, '0.0.0.0', () => {
   console.log(\`NetAdmin API v4.0 → http://0.0.0.0:\${API_PORT}\`);
 });
