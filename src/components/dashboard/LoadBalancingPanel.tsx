@@ -582,13 +582,26 @@ function FailoverLog({ wans }: { wans: string[] }) {
               Alertas por Telegram
             </h4>
             <button
-              onClick={() => {
-                const newConfig = { ...tgConfig, enabled: !tgConfig.enabled };
+              onClick={async () => {
+                const newEnabled = !tgConfig.enabled;
+                const newConfig = { ...tgConfig, enabled: newEnabled };
                 setTgConfig(newConfig);
+                // Auto-save enabled state if bot is configured
+                if (tgConfig.botToken && tgConfig.chatId) {
+                  try {
+                    await api.setTelegramConfig(tgConfig.botToken, tgConfig.chatId, newEnabled);
+                    setTgMsg({ type: "success", text: newEnabled ? "✅ Bot activado" : "Bot desactivado" });
+                  } catch {
+                    setTgMsg({ type: "error", text: "Error al cambiar estado del bot" });
+                    setTgConfig(prev => ({ ...prev, enabled: !newEnabled }));
+                  }
+                }
               }}
+              disabled={!tgConfig.botToken || !tgConfig.chatId}
               className={`relative w-12 h-6 rounded-full transition-all ${
                 tgConfig.enabled ? "bg-success" : "bg-muted"
-              }`}
+              } ${!tgConfig.botToken || !tgConfig.chatId ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+              title={!tgConfig.botToken || !tgConfig.chatId ? "Configura el Bot Token y Chat ID primero" : tgConfig.enabled ? "Desactivar bot" : "Activar bot"}
             >
               <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
                 tgConfig.enabled ? "left-6" : "left-0.5"
