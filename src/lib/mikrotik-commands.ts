@@ -7,7 +7,10 @@ export interface MikroTikCommand {
   body?: Record<string, unknown>;
 }
 
-export function getStepCommands(step: number, serverIp: string): MikroTikCommand[] {
+export function getStepCommands(step: number, serverIp: string, totalBw: number = 100): MikroTikCommand[] {
+  const dnsBw = Math.max(1, Math.round(totalBw * 0.05));
+  const voipBw = Math.max(1, Math.round(totalBw * 0.10));
+  const clientBw = Math.max(1, totalBw - dnsBw - voipBw);
   switch (step) {
     case 1: // DNS
       return [
@@ -34,10 +37,10 @@ export function getStepCommands(step: number, serverIp: string): MikroTikCommand
       ];
     case 5: // Queue Tree
       return [
-        { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Total-Download', parent: 'global', 'max-limit': '100M', comment: 'NetAdmin: BW total download' } },
-        { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': '5M', comment: 'NetAdmin: DNS alta prioridad' } },
-        { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': '10M', comment: 'NetAdmin: VoIP alta prioridad' } },
-        { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': '90M', comment: 'NetAdmin: Tráfico general clientes' } },
+        { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Total-Download', parent: 'global', 'max-limit': `${totalBw}M`, comment: 'NetAdmin: BW total download' } },
+        { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': `${dnsBw}M`, comment: 'NetAdmin: DNS alta prioridad' } },
+        { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': `${voipBw}M`, comment: 'NetAdmin: VoIP alta prioridad' } },
+        { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': `${clientBw}M`, comment: 'NetAdmin: Tráfico general clientes' } },
       ];
     case 6: // Simple Queues (example)
       return [
