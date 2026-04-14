@@ -1113,8 +1113,8 @@ app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
   const config = getMkConfig();
   if (!config) return res.status(400).json({ success: false, error: 'No hay configuración MikroTik guardada. Configura primero.' });
   try {
-    const https = require('https');
     const agent = new https.Agent({ rejectUnauthorized: false });
+    const url = `https://${config.host}:${config.port}/rest/system/identity`;
     const url = \`https://\${config.host}:\${config.port}/rest/system/identity\`;
     const authHeader = 'Basic ' + Buffer.from(\`\${config.user}:\${config.password}\`).toString('base64');
     const controller = new AbortController();
