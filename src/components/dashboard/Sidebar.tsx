@@ -1,7 +1,6 @@
 import {
   Activity,
   ShieldCheck,
-  
   Shield,
   Cloud,
   LayoutDashboard,
@@ -14,6 +13,7 @@ import {
   Gauge,
   Monitor,
   Database,
+  Network,
   Settings,
 } from "lucide-react";
 import type { Section } from "@/pages/Index";
