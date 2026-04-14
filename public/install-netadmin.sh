@@ -1423,8 +1423,6 @@ PING_SCRIPT
 chmod +x ${NETADMIN_DIR}/configs/ping-monitor.sh
 # Fix line endings (remove Windows CRLF) on all generated scripts
 sed -i 's/\r$//' ${NETADMIN_DIR}/configs/ping-monitor.sh
-sed -i 's/\r$//' ${NETADMIN_DIR}/configs/update-blocklists.sh
-sed -i 's/\r$//' ${NETADMIN_DIR}/configs/cron-entry.sh
 
 # ============================================================
 # 8. NGINX CONFIG
@@ -1648,6 +1646,8 @@ while true; do
 done
 CRON_ENTRY
 chmod +x ${NETADMIN_DIR}/configs/cron-entry.sh
+sed -i 's/\r$//' ${NETADMIN_DIR}/configs/update-blocklists.sh
+sed -i 's/\r$//' ${NETADMIN_DIR}/configs/cron-entry.sh
 
 # ============================================================
 # 10. DOCKER COMPOSE — TODOS LOS SERVICIOS
