@@ -1421,8 +1421,10 @@ while true; do
 done
 PING_SCRIPT
 chmod +x ${NETADMIN_DIR}/configs/ping-monitor.sh
-# Fix line endings (remove Windows CRLF)
+# Fix line endings (remove Windows CRLF) on all generated scripts
 sed -i 's/\r$//' ${NETADMIN_DIR}/configs/ping-monitor.sh
+sed -i 's/\r$//' ${NETADMIN_DIR}/configs/update-blocklists.sh
+sed -i 's/\r$//' ${NETADMIN_DIR}/configs/cron-entry.sh
 
 # ============================================================
 # 8. NGINX CONFIG
