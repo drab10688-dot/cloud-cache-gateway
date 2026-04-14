@@ -1159,7 +1159,7 @@ app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
   if (!config) return res.status(400).json({ success: false, error: 'No hay configuración MikroTik guardada. Configura primero.' });
 
   // RouterOS API protocol (v6 or v7 API port)
-  const isApiProtocol = config.version === 'v6' || [8728, 8729, 8730].includes(config.port);
+  const isApiProtocol = config.version === 'v6' || (config.port !== 443 && config.port !== 80);
   if (isApiProtocol) {
     let api;
     try {
