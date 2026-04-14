@@ -138,4 +138,7 @@ export const api = {
 
   // Server Monitor
   getServerMonitor: () => apiFetch('/system/monitor'),
+
+  // Cache Stats (Lancache / apt-cacher-ng / Nginx)
+  getCacheStats: () => apiFetch('/cache/stats'),
 };
