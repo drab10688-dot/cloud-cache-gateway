@@ -28,6 +28,12 @@ export function MikroTikPanel() {
   // Step execution
   const [stepStatus, setStepStatus] = useState<Record<number, StepStatus>>({});
 
+  // Bandwidth for Queue Tree auto-calc
+  const [totalBandwidth, setTotalBandwidth] = useState(100);
+  const dnsBw = Math.max(1, Math.round(totalBandwidth * 0.05));
+  const voipBw = Math.max(1, Math.round(totalBandwidth * 0.10));
+  const clientBw = Math.max(1, totalBandwidth - dnsBw - voipBw);
+
   // Load saved device on mount
   useEffect(() => {
     const saved = getDevice();
