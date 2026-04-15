@@ -1554,17 +1554,11 @@ http {
         }
 
         location = /adguard {
-            return 302 /adguard/;
+            return 302 http://\$host:3000/;
         }
 
         location /adguard/ {
-            proxy_pass http://netadmin-adguard:3000/;
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_set_header X-Forwarded-Prefix /adguard;
-            proxy_redirect / /adguard/;
+            return 302 http://\$host:3000/;
         }
 
         location /kuma/ {
@@ -1777,7 +1771,7 @@ services:
     ports:
       - "53:53/tcp"
       - "53:53/udp"
-      - "127.0.0.1:3000:3000/tcp"
+      - "3000:3000/tcp"
     environment:
       - UPSTREAM_DNS=172.20.0.10:5335
     depends_on:
@@ -2185,6 +2179,7 @@ ufw allow from 10.0.0.0/8 to any port 53 proto udp
 ufw allow from 172.16.0.0/12 to any port 53 proto tcp
 ufw allow from 172.16.0.0/12 to any port 53 proto udp
 ufw allow ${PANEL_PORT}/tcp
+ufw allow 3000/tcp
 ufw allow 3001/tcp
 ufw allow 3128/tcp
 ufw allow 3142/tcp
@@ -2204,7 +2199,7 @@ echo ""
 echo -e "  ${CYAN}Todo corre en:${NC} /opt/netadmin/docker-compose.yml"
 echo ""
 echo -e "  ${CYAN}Panel Web:${NC}        http://${IP_ADDR}:${PANEL_PORT}"
-echo -e "  ${CYAN}AdGuard Home:${NC}     http://${IP_ADDR}:${PANEL_PORT}/adguard/"
+echo -e "  ${CYAN}AdGuard Home:${NC}     http://${IP_ADDR}:3000"
 echo -e "  ${CYAN}Uptime Kuma:${NC}      http://${IP_ADDR}:3001"
 echo -e "  ${CYAN}Speed Test:${NC}       http://${IP_ADDR}:${PANEL_PORT}/speedtest"
 echo -e "  ${CYAN}Contraseña:${NC}       ${YELLOW}${PANEL_PASS}${NC}"
