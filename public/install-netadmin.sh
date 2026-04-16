@@ -365,6 +365,7 @@ dns:
   cache_ttl_min: 300
   cache_ttl_max: 86400
   ratelimit: 0
+  upstream_timeout: 10s
   blocking_mode: default
   protection_enabled: true
   filtering_enabled: true
@@ -385,6 +386,8 @@ filters:
     url: https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
     name: Steven Black Hosts
     id: 3
+user_rules:
+  - '||suros.xyz^'
 ADGUARD_CONF2
 
 success "AdGuard Home configurado → Unbound 172.20.0.10:5335"
@@ -1880,9 +1883,17 @@ fi
 
 # ── 3. NOTIFICAR A ADGUARD PARA RECARGAR FILTROS ──
 log "  Recargando filtros en AdGuard..."
-RELOAD_RESULT=$(wget -q -O- --post-data='{}' \
+COOKIE_JAR=$(mktemp)
+LOGIN_PAYLOAD='{"name":"admin","password":"'"${PANEL_PASS}"'"}'
+LOGIN_RESULT=$(wget -q -S --save-cookies "$COOKIE_JAR" --keep-session-cookies \
   --header='Content-Type: application/json' \
-  "${ADGUARD_URL}/control/filtering/refresh" 2>&1) || true
+  --post-data="$LOGIN_PAYLOAD" \
+  -O- "${ADGUARD_URL}/control/login" 2>&1) || true
+RELOAD_RESULT=$(wget -q -S --load-cookies "$COOKIE_JAR" \
+  --header='Content-Type: application/json' \
+  --post-data='{}' -O- "${ADGUARD_URL}/control/filtering/refresh" 2>&1) || true
+rm -f "$COOKIE_JAR"
+log "  AdGuard login: ${LOGIN_RESULT:-OK}"
 log "  AdGuard reload: ${RELOAD_RESULT:-OK}"
 
 # ── 4. GUARDAR ESTADO ──
@@ -2129,6 +2140,7 @@ services:
       netadmin:
         ipv4_address: 172.20.0.20
     restart: "no"
+    profiles: ["manual"]
 
 networks:
   netadmin:
@@ -2187,6 +2199,7 @@ docker ps -a --filter "name=netadmin-" -q | xargs -r docker rm -f 2>/dev/null ||
 
 docker compose build --quiet
 docker compose up -d --remove-orphans
+docker compose stop cloudflared 2>/dev/null || true
 
 # Wait for containers to stabilize
 log "Esperando que los contenedores se estabilicen..."
@@ -2242,7 +2255,7 @@ cat > /usr/local/bin/netadmin-tunnel << 'TUNNEL'
 #!/bin/bash
 case "$1" in
   start)
-    docker start netadmin-cloudflared 2>/dev/null
+    docker compose -f /opt/netadmin/docker-compose.yml up -d cloudflared >/dev/null 2>&1 || docker start netadmin-cloudflared 2>/dev/null
     sleep 6
     URL=$(docker logs netadmin-cloudflared 2>&1 | grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1)
     [ -n "$URL" ] && echo "$URL" > /opt/netadmin/data/tunnel-url.txt
