@@ -815,7 +815,8 @@ app.get('/api/ping/downtime', (req, res) => {
 // === ADGUARD PROXY ===
 const proxyAdGuard = (path, method = 'GET') => async (req, res) => {
   try {
-    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    const cookie = await adguardLogin();
+    const opts = { method, headers: { 'Content-Type': 'application/json', Cookie: cookie } };
     if (method === 'POST') opts.body = JSON.stringify(req.body);
     const r = await fetch(`${ADGUARD_URL}${path}`, opts);
     const contentType = r.headers.get('content-type') || '';
