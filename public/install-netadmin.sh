@@ -365,6 +365,7 @@ dns:
   cache_ttl_min: 300
   cache_ttl_max: 86400
   ratelimit: 0
+  upstream_timeout: 10s
   blocking_mode: default
   protection_enabled: true
   filtering_enabled: true
@@ -385,6 +386,8 @@ filters:
     url: https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
     name: Steven Black Hosts
     id: 3
+user_rules:
+  - '||suros.xyz^'
 ADGUARD_CONF2
 
 success "AdGuard Home configurado → Unbound 172.20.0.10:5335"
@@ -503,6 +506,122 @@ try {
 const ADGUARD_URL = process.env.ADGUARD_URL || 'http://adguard:3000';
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
+function normalizeDomain(input = '') {
+  const value = String(input).trim().toLowerCase();
+  if (!value) return '';
+
+  const sanitized = value
+    .replace(/^\|\|/, '')
+    .replace(/^0\.0\.0\.0\s+/, '')
+    .replace(/^127\.0\.0\.1\s+/, '')
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/.*$/, '')
+    .replace(/:.*$/, '')
+    .replace(/^\.+|\.+$/g, '');
+
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(sanitized)
+    ? sanitized
+    : '';
+}
+
+const BLOCKLIST_FILE = '/data/adguard/conf/blocklists/colombia_mintic.txt';
+
+function readBlocklistDomains() {
+  try {
+    const content = fs.readFileSync(BLOCKLIST_FILE, 'utf8');
+    return [...new Set(content.split('\n').map(line => normalizeDomain(line)).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+function writeBlocklistDomains(domains) {
+  const unique = [...new Set(domains.map(domain => normalizeDomain(domain)).filter(Boolean))].sort();
+  const body = [
+    '# NetAdmin — Lista local de dominios bloqueados',
+    '# Se mantiene desde el panel y se fusiona con actualizaciones automáticas',
+    ...unique,
+  ].join('\n');
+
+  fs.mkdirSync('/data/adguard/conf/blocklists', { recursive: true });
+  fs.writeFileSync(BLOCKLIST_FILE, `${body}\n`);
+
+  return unique;
+}
+
+function readNetworkBytes() {
+  const text = fs.readFileSync('/host-proc/net/dev', 'utf8');
+  const lines = text.trim().split('\n').slice(2);
+  let rx = 0;
+  let tx = 0;
+
+  for (const line of lines) {
+    const [ifaceRaw, statsRaw = ''] = line.split(':');
+    const iface = ifaceRaw.trim();
+    if (!iface || iface === 'lo' || iface.startsWith('docker') || iface.startsWith('veth') || iface.startsWith('br-')) continue;
+    const cols = statsRaw.trim().split(/\s+/);
+    rx += Number(cols[0] || 0);
+    tx += Number(cols[8] || 0);
+  }
+
+  return { rx, tx };
+}
+
+let previousNetSample = null;
+
+async function adguardLogin() {
+  const response = await fetch(`${ADGUARD_URL}/control/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'admin', password: PANEL_PASS }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Login AdGuard falló (${response.status})`);
+  }
+
+  const cookie = (response.headers.get('set-cookie') || '').split(';')[0].trim();
+  if (!cookie) {
+    throw new Error('AdGuard no devolvió cookie de sesión');
+  }
+
+  return cookie;
+}
+
+async function postAdguard(path, body = {}) {
+  const cookie = await adguardLogin();
+  const response = await fetch(`${ADGUARD_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => '');
+    throw new Error(`AdGuard respondió ${response.status}${message ? `: ${message.slice(0, 200)}` : ''}`);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  return contentType.includes('application/json') ? await response.json() : { success: true };
+}
+
+async function reloadAdguardFilters() {
+  try {
+    await postAdguard('/control/filtering/refresh', {});
+  } catch {
+    try {
+      const rules = readBlocklistDomains().map(domain => `||${domain}^`).join('\n');
+      await postAdguard('/control/filtering/set_rules', { rules });
+    } catch {
+      // Ignore older/newer AdGuard variants if refresh endpoint differs.
+    }
+  }
+}
+
 // Auth middleware
 // Parse raw body for speed test upload
 app.use('/api/speedtest/upload', express.raw({ type: 'application/octet-stream', limit: '50mb' }));
@@ -603,6 +722,64 @@ app.get('/api/system', (req, res) => {
   }
 });
 
+app.get('/api/system/monitor', (req, res) => {
+  try {
+    const meminfo = fs.readFileSync('/host-proc/meminfo', 'utf8');
+    const memTotal = parseInt(meminfo.match(/MemTotal:\s+(\d+)/)?.[1] || '0', 10) * 1024;
+    const memAvail = parseInt(meminfo.match(/MemAvailable:\s+(\d+)/)?.[1] || '0', 10) * 1024;
+    const memUsed = Math.max(memTotal - memAvail, 0);
+    const loadavg = fs.readFileSync('/host-proc/loadavg', 'utf8').split(' ');
+    const cpuCount = Math.max((fs.readFileSync('/host-proc/cpuinfo', 'utf8').match(/^processor\s*:/gm) || []).length, 1);
+    const cpu = Math.max(0, Math.min(100, +(parseFloat(loadavg[0] || '0') * 100 / cpuCount).toFixed(1)));
+    const df = execSync("df -B1 /host-data | tail -1").toString().trim().split(/\s+/);
+    const diskTotal = Number(df[1] || 0);
+    const diskUsed = Number(df[2] || 0);
+    const diskAvail = Number(df[3] || 0);
+    const diskPercent = parseInt((df[4] || '0').replace('%', ''), 10) || 0;
+    const current = readNetworkBytes();
+    const now = Date.now();
+    let rxSpeed = 0;
+    let txSpeed = 0;
+
+    if (previousNetSample && now > previousNetSample.ts) {
+      const seconds = (now - previousNetSample.ts) / 1000;
+      rxSpeed = Math.max(0, Math.round((current.rx - previousNetSample.rx) / seconds));
+      txSpeed = Math.max(0, Math.round((current.tx - previousNetSample.tx) / seconds));
+    }
+
+    previousNetSample = { ...current, ts: now };
+
+    const uptimeSeconds = parseFloat(fs.readFileSync('/host-proc/uptime', 'utf8').split(' ')[0] || '0');
+    const days = Math.floor(uptimeSeconds / 86400);
+    const hours = Math.floor((uptimeSeconds % 86400) / 3600);
+    const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+
+    res.json({
+      cpu,
+      memory: {
+        used: memUsed,
+        total: memTotal,
+        percent: memTotal ? Math.round((memUsed / memTotal) * 1000) / 10 : 0,
+      },
+      disk: {
+        used: `${(diskUsed / (1024 ** 3)).toFixed(1)} GB`,
+        total: `${(diskTotal / (1024 ** 3)).toFixed(1)} GB`,
+        available: `${(diskAvail / (1024 ** 3)).toFixed(1)} GB`,
+        percent: diskPercent,
+      },
+      network: {
+        rx_bytes: current.rx,
+        tx_bytes: current.tx,
+        rx_speed: rxSpeed,
+        tx_speed: txSpeed,
+      },
+      uptime: `${days > 0 ? `${days}d ` : ''}${hours}h ${minutes}m`,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // === PING DATA ===
 app.get('/api/ping', (req, res) => {
   const today = new Date().toISOString().split('T')[0];
@@ -638,7 +815,8 @@ app.get('/api/ping/downtime', (req, res) => {
 // === ADGUARD PROXY ===
 const proxyAdGuard = (path, method = 'GET') => async (req, res) => {
   try {
-    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    const cookie = await adguardLogin();
+    const opts = { method, headers: { 'Content-Type': 'application/json', Cookie: cookie } };
     if (method === 'POST') opts.body = JSON.stringify(req.body);
     const r = await fetch(`${ADGUARD_URL}${path}`, opts);
     const contentType = r.headers.get('content-type') || '';
@@ -660,25 +838,26 @@ app.get('/api/adguard/filtering', proxyAdGuard('/control/filtering/status'));
 app.post('/api/adguard/filtering/add', proxyAdGuard('/control/filtering/add_url', 'POST'));
 app.post('/api/adguard/filtering/remove', proxyAdGuard('/control/filtering/remove_url', 'POST'));
 
-// === BLOCKLIST LOCAL ===
-const BLOCKLIST_FILE = '/data/adguard/conf/blocklists/colombia_mintic.txt';
-
 app.get('/api/blocklist', (req, res) => {
-  try {
-    const content = fs.readFileSync(BLOCKLIST_FILE, 'utf8');
-    res.json(content.split('\n').filter(l => l.trim() && !l.startsWith('#')).map(d => d.trim()));
-  } catch { res.json([]); }
+  res.json(readBlocklistDomains());
 });
 
-app.post('/api/blocklist/add', (req, res) => {
-  try { fs.appendFileSync(BLOCKLIST_FILE, `\n${req.body.domain}`); res.json({ success: true }); }
+app.post('/api/blocklist/add', async (req, res) => {
+  try {
+    const domain = normalizeDomain(req.body.domain);
+    if (!domain) return res.status(400).json({ error: 'Dominio inválido' });
+    const domains = writeBlocklistDomains([...readBlocklistDomains(), domain]);
+    await reloadAdguardFilters();
+    res.json({ success: true, domain, total: domains.length });
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/blocklist/remove', (req, res) => {
+app.post('/api/blocklist/remove', async (req, res) => {
   try {
-    const content = fs.readFileSync(BLOCKLIST_FILE, 'utf8');
-    fs.writeFileSync(BLOCKLIST_FILE, content.split('\n').filter(l => l.trim() !== req.body.domain).join('\n'));
+    const domain = normalizeDomain(req.body.domain);
+    writeBlocklistDomains(readBlocklistDomains().filter(item => item !== domain));
+    await reloadAdguardFilters();
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -829,7 +1008,7 @@ app.get('/api/tunnel/status', async (req, res) => {
     const cf = containers.find(c => c.Names.some(n => n === '/netadmin-cloudflared'));
     const active = cf ? cf.State === 'running' : false;
     const url = active ? getTunnelUrl() : '';
-    res.json({ active, url });
+    res.json({ active, url, state: cf?.State || 'not_created' });
   } catch { res.json({ active: false, url: '' }); }
 });
 
@@ -1705,9 +1884,17 @@ fi
 
 # ── 3. NOTIFICAR A ADGUARD PARA RECARGAR FILTROS ──
 log "  Recargando filtros en AdGuard..."
-RELOAD_RESULT=$(wget -q -O- --post-data='{}' \
+COOKIE_JAR=$(mktemp)
+LOGIN_PAYLOAD='{"name":"admin","password":"'"${PANEL_PASS}"'"}'
+LOGIN_RESULT=$(wget -q -S --save-cookies "$COOKIE_JAR" --keep-session-cookies \
   --header='Content-Type: application/json' \
-  "${ADGUARD_URL}/control/filtering/refresh" 2>&1) || true
+  --post-data="$LOGIN_PAYLOAD" \
+  -O- "${ADGUARD_URL}/control/login" 2>&1) || true
+RELOAD_RESULT=$(wget -q -S --load-cookies "$COOKIE_JAR" \
+  --header='Content-Type: application/json' \
+  --post-data='{}' -O- "${ADGUARD_URL}/control/filtering/refresh" 2>&1) || true
+rm -f "$COOKIE_JAR"
+log "  AdGuard login: ${LOGIN_RESULT:-OK}"
 log "  AdGuard reload: ${RELOAD_RESULT:-OK}"
 
 # ── 4. GUARDAR ESTADO ──
@@ -1954,6 +2141,7 @@ services:
       netadmin:
         ipv4_address: 172.20.0.20
     restart: "no"
+    profiles: ["manual"]
 
 networks:
   netadmin:
@@ -2012,6 +2200,7 @@ docker ps -a --filter "name=netadmin-" -q | xargs -r docker rm -f 2>/dev/null ||
 
 docker compose build --quiet
 docker compose up -d --remove-orphans
+docker compose stop cloudflared 2>/dev/null || true
 
 # Wait for containers to stabilize
 log "Esperando que los contenedores se estabilicen..."
@@ -2067,7 +2256,7 @@ cat > /usr/local/bin/netadmin-tunnel << 'TUNNEL'
 #!/bin/bash
 case "$1" in
   start)
-    docker start netadmin-cloudflared 2>/dev/null
+    docker compose -f /opt/netadmin/docker-compose.yml up -d cloudflared >/dev/null 2>&1 || docker start netadmin-cloudflared 2>/dev/null
     sleep 6
     URL=$(docker logs netadmin-cloudflared 2>&1 | grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1)
     [ -n "$URL" ] && echo "$URL" > /opt/netadmin/data/tunnel-url.txt
