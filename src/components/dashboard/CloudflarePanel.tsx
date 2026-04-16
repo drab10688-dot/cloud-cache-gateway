@@ -18,7 +18,10 @@ export function CloudflarePanel() {
       const status = await api.getTunnelStatus();
       setTunnelActive(status.active);
       setTunnelUrl(status.url || "");
-    } catch { /* offline */ }
+    } catch {
+      setTunnelActive(false);
+      setTunnelUrl("");
+    }
     finally { setInitialLoading(false); }
   }, []);
 

@@ -86,6 +86,19 @@ function parseDomains(content: string): string[] {
   return [...new Set(domains)]; // deduplicate
 }
 
+function normalizeDomainInput(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "")
+    .replace(/:.*$/, "")
+    .replace(/^\|\|/, "")
+    .replace(/\^$/, "")
+    .replace(/^\.+|\.+$/g, "");
+}
+
 export function DnsBlocklist() {
   const [blocklist, setBlocklist] = useState<BlockedDomain[]>([]);
   const [adguardStats, setAdguardStats] = useState<any>(null);
@@ -122,11 +135,12 @@ export function DnsBlocklist() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const addDomain = async () => {
-    if (!newDomain.trim()) return;
+    const normalized = normalizeDomainInput(newDomain);
+    if (!normalized) return;
     try {
-      await api.addToBlocklist(newDomain.trim().toLowerCase());
+      await api.addToBlocklist(normalized);
       const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
-      setBlocklist([{ domain: newDomain.trim().toLowerCase(), reason: reasons[newCategory] || "Manual", category: newCategory, active: true }, ...blocklist]);
+      setBlocklist([{ domain: normalized, reason: reasons[newCategory] || "Manual", category: newCategory, active: true }, ...blocklist.filter(item => item.domain !== normalized)]);
       setNewDomain("");
     } catch {}
   };
