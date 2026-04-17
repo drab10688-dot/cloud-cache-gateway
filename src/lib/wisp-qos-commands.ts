@@ -1,13 +1,14 @@
 /**
  * WISP QoS tuning commands.
  *
- * APPLY uses backend step aliases (`step:N:serverIp`) — same mechanism as
- * MikroTikPanel, which is confirmed to work on both RouterOS v6 and v7.
- *
- * ROLLBACK / DETECT use REST GET/DELETE which only work on v7 with the
- * generic REST passthrough on the backend. On v6 they fail silently and
- * the UI keeps the previous state — apply still works.
+ * Strategy: try `step:N:serverIp` first (same proven mechanism MikroTikPanel
+ * uses). If the backend doesn't know that step ("no definido"), fall back to
+ * the equivalent raw REST commands. This works on any backend version
+ * without needing reinstall.
  */
+
+import type { MikroTikCommand } from "./mikrotik-commands";
+import { getStepCommands } from "./mikrotik-commands";
 
 export type ImprovementKey = "mss" | "quic" | "conntrack" | "fqcodel";
 
@@ -17,23 +18,50 @@ const TAG_QUIC_443 = "NetAdmin: Bloquear QUIC";
 const TAG_QUIC_80 = "NetAdmin: Bloquear HTTP/3 alt";
 const TAG_FQCODEL_NAME = "fq-codel-wan";
 
-// Map each improvement to the backend step alias that already works.
-// `serverIp` is unused by these particular steps but the backend accepts
-// the format `step:N:<anything>` and ignores it for steps 3, 7, 8.
+// Map each improvement to the backend step alias.
 const STEP_FOR: Record<ImprovementKey, number> = {
-  mss: 7,        // MSS Clamping
-  quic: 3,       // Bloquear QUIC + HTTP/3
-  conntrack: 8,  // Connection Tracking tuning
-  fqcodel: 10,   // FQ_CODEL queue type
+  mss: 7,
+  quic: 3,
+  conntrack: 8,
+  fqcodel: 10,
 };
 
 const enc = (obj: Record<string, unknown>) => JSON.stringify(obj);
 
-// Build apply command list for a given improvement, given a serverIp.
-// All keys use backend step aliases (works on RouterOS v6 + v7).
+// Convert a MikroTikCommand to the raw REST string the backend passthrough understands.
+function cmdToRest(c: MikroTikCommand): string {
+  if (c.method === "GET" || c.method === "DELETE") {
+    return `${c.method} ${c.endpoint}`;
+  }
+  return `${c.method} ${c.endpoint} ${enc(c.body || {})}`;
+}
+
+// Primary apply: step alias (same as MikroTikPanel uses).
 export function buildApplyCommands(key: ImprovementKey, serverIp: string): string[] {
   const step = STEP_FOR[key];
   return [`step:${step}:${serverIp || "127.0.0.1"}`];
+}
+
+// Fallback apply: raw REST commands equivalent to the step.
+// Used when the backend reports the step is not defined.
+export function buildApplyFallbackCommands(key: ImprovementKey, serverIp: string): string[] {
+  const step = STEP_FOR[key];
+  const cmds = getStepCommands(step, serverIp || "127.0.0.1");
+  return cmds.map(cmdToRest);
+}
+
+// Detect if an error message means "step not implemented in backend"
+export function isStepNotDefinedError(msg: string | undefined): boolean {
+  if (!msg) return false;
+  const m = msg.toLowerCase();
+  return (
+    m.includes("no definido") ||
+    m.includes("not defined") ||
+    m.includes("not implemented") ||
+    m.includes("desconocido") ||
+    m.includes("unknown step") ||
+    m.includes("paso") && m.includes("no")
+  );
 }
 
 // Rollback: REST-based. Will work on v7; on v6 the UI surfaces the error.
@@ -109,7 +137,7 @@ export const DETECT_PROBES: DetectProbe[] = [
   },
 ];
 
-// Backwards-compat exports (for any code still importing the old constants).
+// Backwards-compat exports
 export const APPLY_COMMANDS: Record<ImprovementKey, string[]> = {
   mss: buildApplyCommands("mss", "127.0.0.1"),
   quic: buildApplyCommands("quic", "127.0.0.1"),
