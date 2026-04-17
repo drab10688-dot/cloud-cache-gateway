@@ -10,8 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { mikrotikDeviceApi, MikroTikApiError } from "@/lib/mikrotik-api";
 import {
-  APPLY_COMMANDS,
-  ROLLBACK_COMMANDS,
+  buildApplyCommands,
+  buildRollbackCommands,
   DETECT_PROBES,
 } from "@/lib/wisp-qos-commands";
 
