@@ -1076,7 +1076,11 @@ const TUNNEL_TOKEN_FILE = '/data/tunnel/cf-token.txt';
 
 function sh(cmd) {
   try { return execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim(); }
-  catch (e) { return ''; }
+  catch (e) {
+    // Return stdout + stderr concatenated so callers can diagnose
+    const out = (e.stdout ? e.stdout.toString() : '') + (e.stderr ? e.stderr.toString() : '');
+    return out.trim() || ('exit ' + (e.status || '?') + ': ' + (e.message || ''));
+  }
 }
 
 function containerExists(name) {
