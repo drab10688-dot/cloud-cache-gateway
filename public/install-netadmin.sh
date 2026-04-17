@@ -1684,13 +1684,95 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
       continue;
     }
 
+    // ── Generic passthrough: "METHOD /rest/path [JSON_BODY_OR_QUERY]" ──
+    // Supported: GET, POST, PUT, PATCH, DELETE. Requires REST (v7, port 443/80).
+    const genericMatch = typeof cmd === 'string' && cmd.match(/^(GET|POST|PUT|PATCH|DELETE)\s+(\/rest\/[^\s?]+)(\?[^\s]*)?(\s+(.+))?$/i);
+    if (genericMatch && !isApiProtocol) {
+      const method = genericMatch[1].toUpperCase();
+      const pathBase = genericMatch[2];
+      const queryStr = genericMatch[3] || '';
+      const bodyStr = genericMatch[5];
+      try {
+        const agent = new https.Agent({ rejectUnauthorized: false });
+        const baseUrl = `https://${config.host}:${config.port}${pathBase}`;
+
+        // Special: DELETE /rest/<path>?comment=... or ?name=... → find then remove
+        if (method === 'DELETE' && queryStr) {
+          const params = new URLSearchParams(queryStr.slice(1));
+          const filterKey = params.has('comment') ? 'comment' : params.has('name') ? 'name' : null;
+          if (!filterKey) {
+            results.push({ cmd, success: false, error: 'DELETE requiere ?comment=... o ?name=...' });
+            continue;
+          }
+          const filterVal = params.get(filterKey);
+          const listRes = await fetch(baseUrl, { headers: mkRestHeaders(config), agent });
+          const listText = await listRes.text().catch(() => '');
+          if (!listRes.ok) {
+            results.push({ cmd, success: false, error: `MikroTik ${listRes.status} listando: ${listText.slice(0, 200)}` });
+            continue;
+          }
+          const rows = listText ? JSON.parse(listText) : [];
+          const matches = (Array.isArray(rows) ? rows : []).filter((r) => {
+            const v = r && r[filterKey];
+            return typeof v === 'string' && v.includes(filterVal);
+          });
+          if (matches.length === 0) {
+            results.push({ cmd, success: true, result: { removed: 0, note: 'no había entradas con ese ' + filterKey } });
+            continue;
+          }
+          let removed = 0;
+          const errors = [];
+          for (const row of matches) {
+            const id = row['.id'] || row.id;
+            if (!id) continue;
+            const delRes = await fetch(`${baseUrl}/${encodeURIComponent(id)}`, {
+              method: 'DELETE',
+              headers: mkRestHeaders(config),
+              agent,
+            });
+            if (delRes.ok) removed += 1;
+            else errors.push(`${id}: ${delRes.status}`);
+          }
+          if (errors.length) {
+            results.push({ cmd, success: removed > 0, result: { removed }, error: errors.join('; ') });
+          } else {
+            results.push({ cmd, success: true, result: { removed } });
+          }
+          continue;
+        }
+
+        // GET / POST / PUT / PATCH
+        const fetchOpts = { method, headers: mkRestHeaders(config), agent };
+        if (bodyStr && method !== 'GET') {
+          fetchOpts.body = bodyStr;
+        }
+        const url = baseUrl + (method === 'GET' ? queryStr : '');
+        const r = await fetch(url, fetchOpts);
+        const text = await r.text().catch(() => '');
+        let parsed = null;
+        try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+        if (!r.ok) {
+          results.push({
+            cmd,
+            success: false,
+            error: `MikroTik ${r.status}: ${(typeof parsed === 'object' ? JSON.stringify(parsed) : String(parsed)).slice(0, 300)}`,
+          });
+        } else {
+          results.push({ cmd, success: true, result: parsed });
+        }
+      } catch (e) {
+        results.push({ cmd, success: false, error: `Error REST: ${e.message}` });
+      }
+      continue;
+    }
+
     if (!cmd.startsWith('step:')) {
       results.push({
         cmd,
         success: false,
         error: isApiProtocol
-          ? 'Comando no soportado por este endpoint.'
-          : 'Los scripts avanzados requieren API RouterOS (puerto 8728/8729). En REST solo se soportan acciones guiadas e interfaces:list.',
+          ? `Comando no soportado en API RouterOS v6 (use 'step:N' o 'interfaces:list'): ${String(cmd).slice(0, 80)}`
+          : `Comando no reconocido. Use 'METHOD /rest/path [body]' o 'step:N'. Recibido: ${String(cmd).slice(0, 80)}`,
       });
       continue;
     }
