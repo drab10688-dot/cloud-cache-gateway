@@ -2237,6 +2237,7 @@ services:
       - ./data/squid-logs:/data/squid-logs:ro
       - ./data/cron-logs:/data/cron-logs:ro
       - ./data:/data/tunnel:rw
+      - ./configs:/app/configs:rw
       - ${NETADMIN_DIR}:/host-data:ro
     depends_on:
       - adguard
