@@ -280,33 +280,72 @@ wget -q -O ${NETADMIN_DIR}/configs/root.hints https://www.internic.net/domain/na
 cat > ${NETADMIN_DIR}/configs/unbound.conf << 'EOF'
 server:
     interface: 0.0.0.0
-    port: 5335
+    port: 53
+    do-ip4: yes
     do-ip6: no
+    do-udp: yes
+    do-tcp: yes
     access-control: 0.0.0.0/0 allow
+
+    # === RENDIMIENTO MÁXIMO (ping mínimo) ===
     num-threads: 4
-    msg-cache-slabs: 8
-    rrset-cache-slabs: 8
-    infra-cache-slabs: 8
-    key-cache-slabs: 8
-    msg-cache-size: 128m
-    rrset-cache-size: 256m
-    cache-min-ttl: 3600
-    cache-max-ttl: 86400
+    msg-cache-slabs: 16
+    rrset-cache-slabs: 16
+    infra-cache-slabs: 16
+    key-cache-slabs: 16
+    msg-cache-size: 512m
+    rrset-cache-size: 1g
+    key-cache-size: 128m
+    neg-cache-size: 64m
+    infra-cache-numhosts: 100000
+
+    # === BUFFERS DE RED (latencia ultra baja) ===
+    so-rcvbuf: 8m
+    so-sndbuf: 8m
+    so-reuseport: yes
+    edns-buffer-size: 1232
+    outgoing-range: 8192
+    num-queries-per-thread: 4096
+
+    # === CACHÉ AGRESIVO (responde sin esperar internet) ===
+    cache-min-ttl: 7200
+    cache-max-ttl: 172800
+    cache-min-negative-ttl: 60
     prefetch: yes
     prefetch-key: yes
     serve-expired: yes
-    serve-expired-ttl: 86400
+    serve-expired-ttl: 0
+    serve-expired-reply-ttl: 30
+    serve-expired-client-timeout: 1800
     minimal-responses: yes
+    rrset-roundrobin: yes
+    aggressive-nsec: yes
+
+    # === PRIVACIDAD / HARDENING ===
     hide-identity: yes
     hide-version: yes
     harden-glue: yes
     harden-dnssec-stripped: yes
+    harden-below-nxdomain: yes
+    harden-referral-path: yes
+    use-caps-for-id: no
     qname-minimisation: yes
+    qname-minimisation-strict: no
+
+    # === TRUST / ROOT ===
     auto-trust-anchor-file: "/var/lib/unbound/root.key"
     root-hints: /etc/unbound/root.hints
-    verbosity: 1
+    trust-anchor-signaling: yes
+
+    # === LOGS MÍNIMOS (no consume CPU) ===
+    verbosity: 0
     logfile: ""
     log-queries: no
+    log-replies: no
+    log-servfail: no
+    use-syslog: no
+    statistics-interval: 0
+    extended-statistics: no
 EOF
 
 # ============================================================
@@ -357,7 +396,7 @@ dns:
   protection_enabled: true
   filtering_enabled: true
   upstream_dns:
-    - 172.20.0.10:5335
+    - 172.20.0.10
   fallback_dns:
     - 9.9.9.10
     - 149.112.112.10
@@ -397,7 +436,7 @@ user_rules:
   - '||suros.xyz^$important'
 ADGUARD_CONF2
 
-success "AdGuard Home configurado → Unbound 172.20.0.10:5335"
+success "AdGuard Home configurado → Unbound 172.20.0.10 (puerto 53)"
 
 # ============================================================
 # 4. CONFIGURACIÓN SQUID SSL BUMP
@@ -2032,7 +2071,7 @@ services:
       - "53:53/udp"
       - "3000:3000/tcp"
     environment:
-      - UPSTREAM_DNS=172.20.0.10:5335
+      - UPSTREAM_DNS=172.20.0.10
     depends_on:
       - unbound
     networks:
