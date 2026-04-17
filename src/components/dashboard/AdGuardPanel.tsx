@@ -10,7 +10,7 @@ function UnboundConfigBanner() {
   const adguardUrl = `http://${serverIp}:3000/#dns`;
 
   const copyUpstream = () => {
-    navigator.clipboard.writeText("127.0.0.1:5335");
+    navigator.clipboard.writeText("172.20.0.10");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -28,7 +28,7 @@ function UnboundConfigBanner() {
           </p>
           <div className="flex items-center gap-2 mb-3">
             <code className="flex-1 bg-card border border-border rounded-md px-3 py-2 text-sm font-mono text-primary">
-              127.0.0.1:5335
+              172.20.0.10
             </code>
             <button
               onClick={copyUpstream}
@@ -50,7 +50,7 @@ function UnboundConfigBanner() {
             </a>
           </div>
           <p className="text-xs text-muted-foreground mt-3 border-t border-border/50 pt-2">
-            <strong className="text-foreground">Flujo:</strong> Cliente → AdGuard <span className="text-primary">:53</span> (filtrado) → Unbound <span className="text-primary">:5335</span> (recursivo + caché + DNSSEC)
+            <strong className="text-foreground">Flujo:</strong> Cliente → AdGuard <span className="text-primary">:53</span> (filtrado) → Unbound <span className="text-primary">172.20.0.10:53</span> (recursivo + caché 1.5GB + DNSSEC)
           </p>
         </div>
       </div>
@@ -253,31 +253,31 @@ export function AdGuardPanel() {
         <div className="card-glow rounded-lg p-5">
           <h3 className="text-sm font-semibold text-foreground mb-3">Configuración Unbound</h3>
           <pre className="text-xs font-mono text-muted-foreground bg-secondary/50 p-4 rounded-md overflow-x-auto">
-{`# /etc/unbound/unbound.conf
+{`# /etc/unbound/unbound.conf — modo latencia mínima
 server:
   interface: 0.0.0.0
-  port: 5335
-  do-ip6: no
-  
-  # Rendimiento
-  num-threads: 2
-  msg-cache-size: 64m
-  rrset-cache-size: 128m
-  cache-min-ttl: 300
-  cache-max-ttl: 86400
+  port: 53
+  num-threads: 4
+
+  # Caché masivo (1.5 GB)
+  msg-cache-size: 512m
+  rrset-cache-size: 1g
+  cache-min-ttl: 7200
+  cache-max-ttl: 172800
+
+  # Respuesta instantánea (sin esperar internet)
+  serve-expired: yes
+  serve-expired-client-timeout: 1800
   prefetch: yes
   prefetch-key: yes
-  
-  # Privacidad
-  hide-identity: yes
-  hide-version: yes
-  qname-minimisation: yes
-  
-  # Root hints
-  root-hints: /var/lib/unbound/root.hints
 
-# AdGuard upstream: 127.0.0.1:5335
-# AdGuard → Unbound (recursivo + DNSSEC)`}
+  # Buffers de red ultra rápidos
+  so-rcvbuf: 8m
+  so-sndbuf: 8m
+  so-reuseport: yes
+
+# AdGuard upstream → 172.20.0.10
+# Cliente → AdGuard :53 → Unbound 172.20.0.10:53`}
           </pre>
         </div>
       </div>
