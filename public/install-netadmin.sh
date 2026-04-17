@@ -354,25 +354,32 @@ dns:
   bind_hosts:
     - 0.0.0.0
   port: 53
+  protection_enabled: true
+  filtering_enabled: true
   upstream_dns:
     - 172.20.0.10:5335
   fallback_dns:
     - 9.9.9.10
     - 149.112.112.10
+  bootstrap_dns:
+    - 127.0.0.1
   all_servers: false
   fastest_addr: false
+  fast_queries: true
   cache_size: 4194304
   cache_ttl_min: 300
   cache_ttl_max: 86400
+  cache_optimistic: true
   ratelimit: 0
   upstream_timeout: 10s
+  upstream_mode: load_balance
   blocking_mode: default
-  protection_enabled: true
-  filtering_enabled: true
   parental_enabled: false
   safesearch:
     enabled: false
   safebrowsing_enabled: true
+  use_private_ptr_resolvers: false
+  resolve_clients: false
 filters:
   - enabled: true
     url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
@@ -387,7 +394,7 @@ filters:
     name: Steven Black Hosts
     id: 3
 user_rules:
-  - '||suros.xyz^'
+  - '||suros.xyz^$important'
 ADGUARD_CONF2
 
 success "AdGuard Home configurado → Unbound 172.20.0.10:5335"
