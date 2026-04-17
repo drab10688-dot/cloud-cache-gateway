@@ -1449,7 +1449,8 @@ app.post('/api/system/update-panel', (req, res) => {
   res.json({ success: true, jobId: job.id, message: 'Compilación iniciada en segundo plano' });
   (async () => {
     try {
-      const script = [
+      // ── Step 1: build frontend panel ──
+      const buildScript = [
         'set -e',
         'apk add --no-cache git >/dev/null',
         'rm -rf /build',
@@ -1459,29 +1460,58 @@ app.post('/api/system/update-panel', (req, res) => {
         'npm run build',
         'rm -rf /web/*',
         'cp -r /build/dist/* /web/',
-        'echo OK',
+        // Extract the embedded API server.js from install-netadmin.sh into /api-out so
+        // we can later rebuild netadmin-api with the latest backend code.
+        'mkdir -p /api-out',
+        "awk '/^cat > \\${NETADMIN_DIR}\\/api\\/server.js << .API_JS./{flag=1; next} /^API_JS$/{flag=0} flag' /build/public/install-netadmin.sh > /api-out/server.js",
+        '[ -s /api-out/server.js ] || { echo \"server.js extraction failed\"; exit 1; }',
+        'echo PANEL_OK',
       ].join(' && ');
-      const r = await runOneShot({
+      const r1 = await runOneShot({
         Image: 'node:20-alpine',
-        Cmd: ['sh', '-c', script],
+        Cmd: ['sh', '-c', buildScript],
         HostConfig: {
           Binds: [
             '/opt/netadmin/web:/web:rw',
+            '/opt/netadmin/api:/api-out:rw',
           ],
         },
       });
-      job.logs = (r.logs || '').slice(-4000);
+      job.logs = (r1.logs || '').slice(-4000);
+      if (r1.exitCode !== 0) {
+        job.status = 'error';
+        job.error = 'build del panel falló';
+        job.finishedAt = Date.now();
+        return;
+      }
+
+      // Restart nginx to serve new web bundle immediately
+      try {
+        const nginx = docker.getContainer('netadmin-nginx');
+        await nginx.restart();
+      } catch {}
+
+      // ── Step 2: rebuild netadmin-api with the new server.js ──
+      job.message = 'Panel listo. Reconstruyendo backend API...';
+      const rebuildScript = 'docker compose -f /compose/docker-compose.yml up -d --build api';
+      const r2 = await runOneShot({
+        Image: 'docker:cli',
+        Cmd: ['sh', '-c', rebuildScript],
+        HostConfig: {
+          Binds: [
+            '/var/run/docker.sock:/var/run/docker.sock',
+            '/opt/netadmin:/compose:rw',
+          ],
+        },
+      });
+      job.logs = ((job.logs || '') + '\n--- API REBUILD ---\n' + (r2.logs || '')).slice(-6000);
       job.finishedAt = Date.now();
-      if (r.exitCode === 0) {
-        try {
-          const nginx = docker.getContainer('netadmin-nginx');
-          await nginx.restart();
-        } catch {}
+      if (r2.exitCode === 0) {
         job.status = 'success';
-        job.message = 'Panel web actualizado';
+        job.message = 'Panel web y backend API actualizados';
       } else {
         job.status = 'error';
-        job.error = 'build falló';
+        job.error = 'rebuild del backend API falló (el panel sí se actualizó)';
       }
     } catch (e) {
       job.status = 'error';
