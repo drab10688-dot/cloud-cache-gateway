@@ -144,22 +144,37 @@ export function WispQosTuning({ connected }: { connected: boolean }) {
   }, [polling, connected, fetchCpu]);
 
   // ── Apply / rollback ──
+  // Extracts a meaningful error from the backend response (per-command results or top-level error)
+  const extractError = (res: any, fallback: string): string => {
+    if (!res) return fallback;
+    if (typeof res.error === "string" && res.error.trim()) return res.error;
+    if (Array.isArray(res.results)) {
+      const failed = res.results.find((r: any) => r && r.success === false);
+      if (failed) {
+        return failed.error || failed.message || `Backend rechazó "${failed.cmd || "comando"}"`;
+      }
+    }
+    if (typeof res.message === "string" && res.message.trim()) return res.message;
+    return `${fallback} — el backend no devolvió detalle. Verifica que /api/mikrotik/execute soporte el alias "wisp:*" o actualiza el panel del VPS.`;
+  };
+
   const applyImprovement = async (key: ImprovementKey) => {
     setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined } }));
     try {
       const res = await mikrotikDeviceApi.execute([`wisp:apply:${key}`]);
+      const ok = res.success === true;
       setImprovements(prev => ({
         ...prev,
         [key]: {
           loading: false,
-          active: res.success ? true : prev[key].active,
-          lastMessage: res.success ? `${IMPROVEMENT_META[key].title} aplicado ✓` : undefined,
-          lastError: res.success ? undefined : (res.error || "Error desconocido"),
+          active: ok ? true : prev[key].active,
+          lastMessage: ok ? `${IMPROVEMENT_META[key].title} aplicado ✓` : undefined,
+          lastError: ok ? undefined : extractError(res, "Error al aplicar"),
         },
       }));
-      if (res.success) detectStatus();
+      if (ok) detectStatus();
     } catch (e: any) {
-      const msg = e instanceof MikroTikApiError ? e.message : "Error de conexión";
+      const msg = e instanceof MikroTikApiError ? `${e.message} (HTTP ${e.status})` : (e?.message || "Error de conexión");
       setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: false, lastError: msg } }));
     }
   };

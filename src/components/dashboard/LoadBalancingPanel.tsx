@@ -1062,9 +1062,20 @@ export function LoadBalancingPanel() {
     }
   };
 
-  const ethernetIfaces = interfaces.filter(i =>
-    (i.type === "ethernet" || i.type === "ether") && !i.disabled
-  );
+  // Tolerant filter: include real ethernet/sfp/wlan ports AND interfaces with renamed comments
+  // (e.g. "WAN2", "ether1_MGM_OLT_Zyxel"). Excludes bridges, bonds, vlans, pppoe-client virtuals.
+  const ethernetIfaces = interfaces.filter(i => {
+    if (i.disabled) return false;
+    const t = (i.type || "").toLowerCase();
+    const n = (i.name || "").toLowerCase();
+    // Exclude virtual / aggregated interfaces
+    if (t === "bridge" || t === "bond" || t === "vlan" || t === "pppoe-out" || t === "pppoe-in" || t === "vpls") return false;
+    // Accept by type
+    if (t === "ethernet" || t === "ether" || t.startsWith("ether") || t === "sfp" || t === "wlan" || t === "wireless") return true;
+    // Accept by name pattern when type is missing/unknown (very common with REST API & renamed ports)
+    if (/^(ether|sfp|wlan|wan|combo)/i.test(n)) return true;
+    return false;
+  });
 
   const monitorInterfaces = [...selectedWans, ...(selectedLans.length > 0 ? [bridgeName] : [])];
   const notConnected = !device || !device.connected;
