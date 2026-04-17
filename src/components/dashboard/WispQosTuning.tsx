@@ -201,11 +201,24 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
     if (Array.isArray(res.results)) {
       const failed = res.results.find((r: any) => r && r.success === false);
       if (failed) {
-        return failed.error || failed.message || `Backend rechazó "${failed.cmd || "comando"}"`;
+        if (failed.error) return String(failed.error);
+        if (failed.message) return String(failed.message);
+        // Try to extract details (per-sub-command errors)
+        if (Array.isArray(failed.details)) {
+          const sub = failed.details.find((d: any) => d && (d.error || d.ok === false));
+          if (sub) {
+            const where = sub.endpoint || sub.path || "";
+            const errMsg = sub.error || (sub.status ? `HTTP ${sub.status}` : "fallo");
+            return `${where ? where + ": " : ""}${errMsg}`;
+          }
+          // Show first detail if no explicit error
+          return `Sin detalle. Respuesta: ${JSON.stringify(failed.details).slice(0, 300)}`;
+        }
+        return `Backend rechazó "${failed.cmd || "comando"}". Respuesta cruda: ${JSON.stringify(failed).slice(0, 300)}`;
       }
     }
     if (typeof res.message === "string" && res.message.trim()) return res.message;
-    return `${fallback} — el backend no devolvió detalle.`;
+    return `${fallback} — el backend no devolvió detalle. Respuesta: ${JSON.stringify(res).slice(0, 300)}`;
   };
 
   const runBatch = async (commands: string[]) => {
