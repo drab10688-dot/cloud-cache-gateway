@@ -244,6 +244,31 @@ if ! command -v docker &>/dev/null; then
 fi
 systemctl enable docker && systemctl start docker
 
+# ── FIX RED: kernel/sysctl para que Docker bridge funcione ──
+# Previene "Connection reset" / paquetes dropeados al bridge Docker
+log "Configurando kernel para Docker bridge networking..."
+modprobe br_netfilter 2>/dev/null || true
+modprobe nf_conntrack 2>/dev/null || true
+cat > /etc/sysctl.d/99-netadmin-docker.conf <<'SYSCTL_EOF'
+net.ipv4.ip_forward=1
+net.bridge.bridge-nf-call-iptables=1
+net.bridge.bridge-nf-call-ip6tables=1
+SYSCTL_EOF
+sysctl -p /etc/sysctl.d/99-netadmin-docker.conf >/dev/null 2>&1 || true
+
+# ── FIX UFW: permitir FORWARD para el bridge Docker ──
+if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+  log "Ajustando UFW para Docker bridge..."
+  sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
+  if ! grep -q "netadmin-docker-forward" /etc/ufw/before.rules 2>/dev/null; then
+    sed -i '/^# End required lines/a\\n# netadmin-docker-forward\n-A ufw-before-forward -i br-+ -j ACCEPT\n-A ufw-before-forward -o br-+ -j ACCEPT\n-A ufw-before-forward -i docker0 -j ACCEPT\n-A ufw-before-forward -o docker0 -j ACCEPT' /etc/ufw/before.rules
+  fi
+  ufw allow 80/tcp >/dev/null 2>&1 || true
+  ufw allow 443/tcp >/dev/null 2>&1 || true
+  ufw reload >/dev/null 2>&1 || true
+fi
+success "Kernel y firewall configurados para Docker"
+
 # ── Liberar puerto 53 (systemd-resolved) ──
 if systemctl is-active --quiet systemd-resolved; then
   log "Desactivando systemd-resolved (puerto 53 en uso)..."
