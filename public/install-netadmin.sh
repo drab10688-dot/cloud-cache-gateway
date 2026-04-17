@@ -1478,7 +1478,8 @@ app.post('/api/system/update-panel', (req, res) => {
         // Extract the embedded API server.js from install-netadmin.sh into /api-out so
         // we can later rebuild netadmin-api with the latest backend code.
         'mkdir -p /api-out',
-        "awk '/^cat > \\${NETADMIN_DIR}\\/api\\/server.js << .API_JS./{flag=1; next} /^API_JS$/{flag=0} flag' /build/public/install-netadmin.sh > /api-out/server.js",
+        // Use sed (simpler than awk) — match the literal start/end markers without complex regex
+        "sed -n '/^cat > .*\\/api\\/server\\.js << .API_JS./,/^API_JS$/p' /build/public/install-netadmin.sh | sed '1d;$d' > /api-out/server.js",
         '[ -s /api-out/server.js ] || { echo \"server.js extraction failed\"; exit 1; }',
         'echo PANEL_OK',
       ].join(' && ');
