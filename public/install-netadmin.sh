@@ -1928,7 +1928,9 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
     const stepNum = parseInt(parts[1]);
     const serverIp = parts[2] || config.host;
     // Optional 4th parameter: total bandwidth in Mbps (used by step:5 Queue Tree)
+    // Optional 5th parameter: WAN interface name (used by step:10 FQ_CODEL)
     const totalBw = parts[3] ? parseInt(parts[3]) : undefined;
+    const wanIface = parts[4] || undefined;
 
     if (isApiProtocol) {
       // RouterOS API protocol
