@@ -185,7 +185,8 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
     if (!connected) return;
     detectStatus();
     fetchCpu();
-  }, [connected, detectStatus, fetchCpu]);
+    fetchInterfaces();
+  }, [connected, detectStatus, fetchCpu, fetchInterfaces]);
 
   useEffect(() => {
     if (!polling || !connected) return;
@@ -232,7 +233,7 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
     setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined, lastMessage: undefined } }));
 
     // Usa SIEMPRE step alias — mismo mecanismo que MikroTikPanel (que sí funciona).
-    const { ok, errors } = await runBatch(buildApplyCommands(key, serverIp));
+    const { ok, errors } = await runBatch(buildApplyCommands(key, serverIp, key === "fqcodel" ? wanIface : undefined));
 
     setImprovements(prev => ({
       ...prev,
