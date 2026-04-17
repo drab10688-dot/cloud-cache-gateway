@@ -1237,27 +1237,92 @@ app.get('/api/network/video-stats', (req, res) => {
 });
 
 // === SYSTEM UPDATES ===
-app.post('/api/system/update-docker', (req, res) => {
+// Helper: run a one-shot container via dockerode (host-side actions)
+async function runOneShot({ Image, Cmd, HostConfig = {}, Env = [] }) {
+  // Pull image first (best-effort)
   try {
-    execSync('docker compose -f /host-data/docker-compose.yml pull 2>&1', { timeout: 300000 });
-    execSync('docker compose -f /host-data/docker-compose.yml up -d 2>&1', { timeout: 120000 });
-    res.json({ success: true, message: 'Imágenes actualizadas y contenedores reiniciados' });
+    await new Promise((resolve, reject) => {
+      docker.pull(Image, (err, stream) => {
+        if (err) return reject(err);
+        docker.modem.followProgress(stream, (e) => e ? reject(e) : resolve());
+      });
+    });
+  } catch (e) { /* image may already exist */ }
+
+  const container = await docker.createContainer({
+    Image,
+    Cmd,
+    Env,
+    HostConfig: { AutoRemove: false, ...HostConfig },
+    Tty: false,
+  });
+  await container.start();
+  const result = await container.wait();
+  let logs = '';
+  try {
+    const buf = await container.logs({ stdout: true, stderr: true, follow: false });
+    logs = Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf);
+  } catch {}
+  try { await container.remove({ force: true }); } catch {}
+  return { exitCode: result.StatusCode, logs };
+}
+
+app.post('/api/system/update-docker', async (req, res) => {
+  // Long-running: respond async and stream nothing — return summary at end
+  res.setTimeout(0);
+  try {
+    const r = await runOneShot({
+      Image: 'docker:cli',
+      Cmd: ['sh', '-c', 'docker compose -f /compose/docker-compose.yml pull && docker compose -f /compose/docker-compose.yml up -d'],
+      HostConfig: {
+        Binds: [
+          '/var/run/docker.sock:/var/run/docker.sock',
+          '/opt/netadmin:/compose:rw',
+        ],
+      },
+    });
+    if (r.exitCode === 0) {
+      res.json({ success: true, message: 'Imágenes actualizadas y contenedores reiniciados' });
+    } else {
+      res.status(500).json({ success: false, error: 'docker compose falló', logs: r.logs.slice(-2000) });
+    }
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-app.post('/api/system/update-panel', (req, res) => {
+app.post('/api/system/update-panel', async (req, res) => {
+  res.setTimeout(0);
   try {
-    const cmds = [
-      'rm -rf /tmp/netadmin-panel-build',
-      'git clone --depth 1 https://github.com/drab10688-dot/cloud-cache-gateway.git /tmp/netadmin-panel-build',
-      'cd /tmp/netadmin-panel-build && npm install --silent && npm run build',
-      'cp -r /tmp/netadmin-panel-build/dist/* /host-data/web/',
-      'rm -rf /tmp/netadmin-panel-build',
-    ];
-    // Run via docker to have access to host filesystem and node
-    execSync(`docker run --rm -v /opt/netadmin:/host-data -v /tmp:/tmp node:20-alpine sh -c "${cmds.join(' && ')}"`, { timeout: 300000 });
-    execSync('docker restart netadmin-nginx 2>/dev/null || true');
-    res.json({ success: true, message: 'Panel web actualizado' });
+    const script = [
+      'set -e',
+      'apk add --no-cache git >/dev/null',
+      'rm -rf /build',
+      'git clone --depth 1 https://github.com/drab10688-dot/cloud-cache-gateway.git /build',
+      'cd /build',
+      'npm install --silent --no-audit --no-fund',
+      'npm run build',
+      'rm -rf /web/*',
+      'cp -r /build/dist/* /web/',
+      'echo OK',
+    ].join(' && ');
+    const r = await runOneShot({
+      Image: 'node:20-alpine',
+      Cmd: ['sh', '-c', script],
+      HostConfig: {
+        Binds: [
+          '/opt/netadmin/web:/web:rw',
+        ],
+      },
+    });
+    if (r.exitCode === 0) {
+      // restart nginx
+      try {
+        const nginx = docker.getContainer('netadmin-nginx');
+        await nginx.restart();
+      } catch {}
+      res.json({ success: true, message: 'Panel web actualizado' });
+    } else {
+      res.status(500).json({ success: false, error: 'build falló', logs: r.logs.slice(-2000) });
+    }
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
