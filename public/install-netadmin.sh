@@ -1714,10 +1714,10 @@ function getStepCommandsV7(step, serverIp, totalBw) {
       { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'forward', protocol: 'udp', 'dst-port': '5060-5061', action: 'mark-packet', 'new-packet-mark': 'voip-priority', passthrough: 'no', comment: 'NetAdmin: VoIP prioridad' } },
     ];
     case 5: return [
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Total-Download', parent: 'global', 'max-limit': '100M', comment: 'NetAdmin: BW total' } },
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': '5M' } },
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': '10M' } },
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': '90M' } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Total-Download', parent: 'global', 'max-limit': `${total}M`, comment: `NetAdmin: BW total ${total}M` } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': `${dnsBw}M` } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': `${voipBw}M` } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': `${clientBw}M` } },
     ];
     case 6: return [
       { method: 'PUT', endpoint: '/rest/ppp/profile', body: { name: 'plan-10mbps', 'rate-limit': '10M/10M', 'dns-server': serverIp, comment: 'NetAdmin: Plan 10Mbps' } },
