@@ -1718,6 +1718,7 @@ function getStepCommandsV6(step, serverIp, totalBw) {
     ];
     case 10: return [
       { path: '/queue/type/add', params: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024', comment: 'NetAdmin WISP: FQ_CODEL type' } },
+      { path: '/queue/interface/add', params: { interface: 'ether1', 'queue': 'fq-codel-wan', comment: 'NetAdmin WISP: FQ_CODEL on WAN' } },
     ];
     default: return [];
   }
