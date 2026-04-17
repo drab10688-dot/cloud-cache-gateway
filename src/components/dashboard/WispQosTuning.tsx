@@ -91,7 +91,7 @@ function gradeColor(g?: string) {
   }
 }
 
-export function WispQosTuning({ connected }: { connected: boolean }) {
+export function WispQosTuning({ connected, serverIp }: { connected: boolean; serverIp: string }) {
   const [improvements, setImprovements] = useState<Record<ImprovementKey, ImprovementState>>({
     mss: { loading: false, active: null },
     quic: { loading: false, active: null },
