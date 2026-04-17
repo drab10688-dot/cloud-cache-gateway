@@ -1333,64 +1333,104 @@ async function runOneShot({ Image, Cmd, HostConfig = {}, Env = [] }) {
   return { exitCode: result.StatusCode, logs };
 }
 
-app.post('/api/system/update-docker', async (req, res) => {
-  // Long-running: respond async and stream nothing — return summary at end
-  res.setTimeout(0);
-  try {
-    const r = await runOneShot({
-      Image: 'docker:cli',
-      Cmd: ['sh', '-c', 'docker compose -f /compose/docker-compose.yml pull && docker compose -f /compose/docker-compose.yml up -d'],
-      HostConfig: {
-        Binds: [
-          '/var/run/docker.sock:/var/run/docker.sock',
-          '/opt/netadmin:/compose:rw',
-        ],
-      },
-    });
-    if (r.exitCode === 0) {
-      res.json({ success: true, message: 'Imágenes actualizadas y contenedores reiniciados' });
-    } else {
-      res.status(500).json({ success: false, error: 'docker compose falló', logs: r.logs.slice(-2000) });
-    }
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+// ── Async jobs registry (in-memory) ──
+const jobs = new Map(); // id -> { status, startedAt, finishedAt, message, logs, error }
+function newJob() {
+  const id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  const job = { id, status: 'running', startedAt: Date.now(), finishedAt: null, message: '', logs: '', error: null };
+  jobs.set(id, job);
+  // Auto-cleanup after 1h
+  setTimeout(() => jobs.delete(id), 60 * 60 * 1000);
+  return job;
+}
+
+app.get('/api/system/job/:id', (req, res) => {
+  const j = jobs.get(req.params.id);
+  if (!j) return res.status(404).json({ success: false, error: 'job no encontrado (expiró o id inválido)' });
+  res.json({ success: true, job: j });
 });
 
-app.post('/api/system/update-panel', async (req, res) => {
-  res.setTimeout(0);
-  try {
-    const script = [
-      'set -e',
-      'apk add --no-cache git >/dev/null',
-      'rm -rf /build',
-      'git clone --depth 1 https://github.com/drab10688-dot/cloud-cache-gateway.git /build',
-      'cd /build',
-      'npm install --silent --no-audit --no-fund',
-      'npm run build',
-      'rm -rf /web/*',
-      'cp -r /build/dist/* /web/',
-      'echo OK',
-    ].join(' && ');
-    const r = await runOneShot({
-      Image: 'node:20-alpine',
-      Cmd: ['sh', '-c', script],
-      HostConfig: {
-        Binds: [
-          '/opt/netadmin/web:/web:rw',
-        ],
-      },
-    });
-    if (r.exitCode === 0) {
-      // restart nginx
-      try {
-        const nginx = docker.getContainer('netadmin-nginx');
-        await nginx.restart();
-      } catch {}
-      res.json({ success: true, message: 'Panel web actualizado' });
-    } else {
-      res.status(500).json({ success: false, error: 'build falló', logs: r.logs.slice(-2000) });
+app.post('/api/system/update-docker', (req, res) => {
+  const job = newJob();
+  // Respond immediately
+  res.json({ success: true, jobId: job.id, message: 'Actualización iniciada en segundo plano' });
+  // Run in background
+  (async () => {
+    try {
+      const r = await runOneShot({
+        Image: 'docker:cli',
+        Cmd: ['sh', '-c', 'docker compose -f /compose/docker-compose.yml pull && docker compose -f /compose/docker-compose.yml up -d'],
+        HostConfig: {
+          Binds: [
+            '/var/run/docker.sock:/var/run/docker.sock',
+            '/opt/netadmin:/compose:rw',
+          ],
+        },
+      });
+      job.logs = (r.logs || '').slice(-4000);
+      job.finishedAt = Date.now();
+      if (r.exitCode === 0) {
+        job.status = 'success';
+        job.message = 'Imágenes actualizadas y contenedores reiniciados';
+      } else {
+        job.status = 'error';
+        job.error = 'docker compose falló';
+      }
+    } catch (e) {
+      job.status = 'error';
+      job.error = e.message;
+      job.finishedAt = Date.now();
     }
-  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+  })();
 });
+
+app.post('/api/system/update-panel', (req, res) => {
+  const job = newJob();
+  res.json({ success: true, jobId: job.id, message: 'Compilación iniciada en segundo plano' });
+  (async () => {
+    try {
+      const script = [
+        'set -e',
+        'apk add --no-cache git >/dev/null',
+        'rm -rf /build',
+        'git clone --depth 1 https://github.com/drab10688-dot/cloud-cache-gateway.git /build',
+        'cd /build',
+        'npm install --silent --no-audit --no-fund',
+        'npm run build',
+        'rm -rf /web/*',
+        'cp -r /build/dist/* /web/',
+        'echo OK',
+      ].join(' && ');
+      const r = await runOneShot({
+        Image: 'node:20-alpine',
+        Cmd: ['sh', '-c', script],
+        HostConfig: {
+          Binds: [
+            '/opt/netadmin/web:/web:rw',
+          ],
+        },
+      });
+      job.logs = (r.logs || '').slice(-4000);
+      job.finishedAt = Date.now();
+      if (r.exitCode === 0) {
+        try {
+          const nginx = docker.getContainer('netadmin-nginx');
+          await nginx.restart();
+        } catch {}
+        job.status = 'success';
+        job.message = 'Panel web actualizado';
+      } else {
+        job.status = 'error';
+        job.error = 'build falló';
+      }
+    } catch (e) {
+      job.status = 'error';
+      job.error = e.message;
+      job.finishedAt = Date.now();
+    }
+  })();
+});
+
 
 // === SPEED TEST (public, no auth) ===
 app.get('/api/speedtest/ping', (req, res) => {
@@ -1854,6 +1894,17 @@ http {
             proxy_read_timeout 120s;
             proxy_send_timeout 120s;
             client_max_body_size 50m;
+        }
+
+        # Long-running system ops (update-docker, update-panel): 10 min timeout
+        location /api/system/ {
+            proxy_pass http://netadmin-api:4000;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_connect_timeout 600s;
+            proxy_read_timeout 600s;
+            proxy_send_timeout 600s;
+            proxy_buffering off;
         }
 
         location /api/ {

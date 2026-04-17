@@ -148,9 +148,10 @@ export const api = {
   getVideoStats: () => apiFetch('/network/video-stats'),
   getTcpOptimization: () => apiFetch('/network/tcp-optimization'),
 
-  // System updates — long-running: 10 min client timeout
-  updateDockerImages: () => apiFetch('/system/update-docker', { method: 'POST', timeoutMs: 600000 }),
-  updatePanel: () => apiFetch('/system/update-panel', { method: 'POST', timeoutMs: 600000 }),
+  // System updates — async jobs: server responds immediately with { jobId }
+  updateDockerImages: () => apiFetch('/system/update-docker', { method: 'POST', timeoutMs: 30000 }),
+  updatePanel: () => apiFetch('/system/update-panel', { method: 'POST', timeoutMs: 30000 }),
+  getJobStatus: (jobId: string) => apiFetch(`/system/job/${jobId}`, { timeoutMs: 15000 }),
 
   // Speed Test
   speedTestPing: () => fetch(`${API_BASE}/speedtest/ping?t=${Date.now()}`, { cache: 'no-store' }),

@@ -48,15 +48,50 @@ export function SettingsPanel() {
     }
   };
 
+  const pollJob = async (
+    jobId: string,
+    setMsg: (m: { type: "success" | "error"; text: string }) => void,
+    onSuccess?: () => void
+  ) => {
+    const startedAt = Date.now();
+    const maxMs = 15 * 60 * 1000; // 15 min
+    while (Date.now() - startedAt < maxMs) {
+      await new Promise((r) => setTimeout(r, 4000));
+      try {
+        const r = await api.getJobStatus(jobId);
+        const job = r.job;
+        if (!job) continue;
+        if (job.status === "success") {
+          setMsg({ type: "success", text: job.message || "Completado" });
+          onSuccess?.();
+          return;
+        }
+        if (job.status === "error") {
+          const logTail = job.logs ? `\n\nLogs: ${String(job.logs).slice(-500)}` : "";
+          setMsg({ type: "error", text: (job.error || "Error en el job") + logTail });
+          return;
+        }
+        const mins = Math.floor((Date.now() - startedAt) / 60000);
+        const secs = Math.floor(((Date.now() - startedAt) % 60000) / 1000);
+        setMsg({ type: "success", text: `En progreso... ${mins}m ${secs}s` });
+      } catch (e: any) {
+        // Transient polling error — keep trying
+        setMsg({ type: "success", text: `Verificando... (${e?.message || "reintentando"})` });
+      }
+    }
+    setMsg({ type: "error", text: "Tiempo de espera agotado (15 min). El proceso puede seguir en el servidor; recarga en unos minutos." });
+  };
+
   const handleUpdateImages = async () => {
     setUpdating(true);
-    setUpdateMsg(null);
+    setUpdateMsg({ type: "success", text: "Iniciando actualización..." });
     try {
       const result = await api.updateDockerImages();
-      if (result.success) {
-        setUpdateMsg({ type: "success", text: result.message || "Imágenes actualizadas. Los contenedores se reiniciaron." });
+      if (result.success && result.jobId) {
+        setUpdateMsg({ type: "success", text: "En progreso... esto puede tardar 2-5 minutos" });
+        await pollJob(result.jobId, setUpdateMsg);
       } else {
-        setUpdateMsg({ type: "error", text: result.error || "Error al actualizar" });
+        setUpdateMsg({ type: "error", text: result.error || "Error al iniciar" });
       }
     } catch (e: any) {
       setUpdateMsg({ type: "error", text: e?.message || "Error de conexión con el servidor" });
@@ -67,14 +102,17 @@ export function SettingsPanel() {
 
   const handleUpdatePanel = async () => {
     setUpdatingPanel(true);
-    setPanelMsg(null);
+    setPanelMsg({ type: "success", text: "Iniciando compilación..." });
     try {
       const result = await api.updatePanel();
-      if (result.success) {
-        setPanelMsg({ type: "success", text: "Panel actualizado. Recargando..." });
-        setTimeout(() => window.location.reload(), 3000);
+      if (result.success && result.jobId) {
+        setPanelMsg({ type: "success", text: "Compilando panel... esto tarda 2-5 minutos" });
+        await pollJob(result.jobId, setPanelMsg, () => {
+          setPanelMsg({ type: "success", text: "Panel actualizado. Recargando..." });
+          setTimeout(() => window.location.reload(), 3000);
+        });
       } else {
-        setPanelMsg({ type: "error", text: result.error || "Error al actualizar el panel" });
+        setPanelMsg({ type: "error", text: result.error || "Error al iniciar la actualización" });
       }
     } catch (e: any) {
       setPanelMsg({ type: "error", text: e?.message || "Error de conexión con el servidor" });
