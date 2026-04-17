@@ -1753,10 +1753,12 @@ function getStepCommandsV6(step, serverIp, totalBw, wanIface) {
     ];
     case 10: {
       const iface = wanIface || 'ether1';
-      // NOTE: /queue/type does NOT accept `comment` (neither v6 nor v7) — would fail with "unknown parameter comment"
+      // NOTE: /queue/type does NOT accept `comment` (would fail with "unknown parameter comment")
+      // NOTE: /queue/interface does NOT have `add` — interfaces always exist; use `set` with numbers=<iface_name>
+      // NOTE: /queue/interface/set does NOT accept `comment` either
       return [
         { path: '/queue/type/add', params: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024' } },
-        { path: '/queue/interface/add', params: { interface: iface, 'queue': 'fq-codel-wan', comment: `NetAdmin WISP: FQ_CODEL on ${iface}` } },
+        { path: '/queue/interface/set', params: { numbers: iface, queue: 'fq-codel-wan' } },
       ];
     }
     default: return [];
@@ -1814,10 +1816,12 @@ function getStepCommandsV7(step, serverIp, totalBw, wanIface) {
     ];
     case 10: {
       const iface = wanIface || 'ether1';
-      // NOTE: /queue/type does NOT accept `comment` (neither v6 nor v7) — would fail with "unknown parameter comment"
+      // NOTE: /queue/type does NOT accept `comment` (would fail with "unknown parameter comment")
+      // NOTE: /rest/queue/interface does NOT have POST/PUT for `add` — interfaces always exist; use PATCH on /rest/queue/interface/{iface}
+      // NOTE: /rest/queue/interface does NOT accept `comment` either
       return [
         { method: 'PUT', endpoint: '/rest/queue/type', body: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024' } },
-        { method: 'PUT', endpoint: '/rest/queue/interface', body: { interface: iface, queue: 'fq-codel-wan', comment: `NetAdmin WISP: FQ_CODEL on ${iface}` } },
+        { method: 'PATCH', endpoint: `/rest/queue/interface/${encodeURIComponent(iface)}`, body: { queue: 'fq-codel-wan' } },
       ];
     }
     default: return [];
