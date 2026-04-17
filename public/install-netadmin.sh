@@ -1094,24 +1094,33 @@ async function waitForTunnelUrl(timeoutMs = 25000) {
 }
 
 function ensureCloudflaredContainer(token) {
-  // Remove old container if exists (so we can re-create with fresh args)
+  // Custom token path: manual docker run (compose doesn't have token preconfigured)
+  if (token && token.trim()) {
+    if (containerExists('netadmin-cloudflared')) {
+      sh('docker rm -f netadmin-cloudflared 2>&1');
+    }
+    let network = '';
+    try {
+      network = sh("docker inspect netadmin-api --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}'").trim().split('\n')[0] || '';
+    } catch {}
+    if (!network) {
+      network = sh("docker network ls --format '{{.Name}}' | grep -E '^netadmin' | head -1").trim() || 'netadmin_default';
+    }
+    const cmd = `docker run -d --name netadmin-cloudflared --restart unless-stopped --network ${network} cloudflare/cloudflared:latest tunnel --no-autoupdate run --token ${token.trim()}`;
+    const out = sh(cmd);
+    if (!containerExists('netadmin-cloudflared')) {
+      throw new Error('No se pudo crear cloudflared con token. Salida: ' + (out || 'vacío'));
+    }
+    return;
+  }
+  // Quick Tunnel: use docker compose — SAME method as 'netadmin-tunnel start' (proven to work)
   if (containerExists('netadmin-cloudflared')) {
     sh('docker rm -f netadmin-cloudflared 2>&1');
   }
-  // Detect compose network — prefer the one the API itself is attached to
-  let network = '';
-  try {
-    network = sh("docker inspect netadmin-api --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}'").trim().split('\n')[0] || '';
-  } catch {}
-  if (!network) {
-    network = sh("docker network ls --format '{{.Name}}' | grep -E '^netadmin' | head -1").trim() || 'netadmin_default';
+  const composeOut = sh('cd /opt/netadmin && docker compose up -d cloudflared 2>&1');
+  if (!containerExists('netadmin-cloudflared')) {
+    throw new Error('docker compose up -d cloudflared falló. Salida:\n' + (composeOut || 'vacío'));
   }
-  const baseRun = `docker run -d --name netadmin-cloudflared --restart unless-stopped --network ${network} cloudflare/cloudflared:latest`;
-  const cmd = token && token.trim()
-    ? `${baseRun} tunnel --no-autoupdate run --token ${token.trim()}`
-    : `${baseRun} tunnel --no-autoupdate --url http://netadmin-nginx:80`;
-  const out = sh(cmd);
-  if (!out) throw new Error('No se pudo crear el contenedor cloudflared. Revisa: docker logs netadmin-cloudflared');
 }
 
 app.get('/api/tunnel/status', async (req, res) => {
