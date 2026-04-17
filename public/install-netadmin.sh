@@ -1632,7 +1632,11 @@ app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
 });
 
 // Step commands for API protocol (v6 compatible — uses CLI-style paths)
-function getStepCommandsV6(step, serverIp) {
+function getStepCommandsV6(step, serverIp, totalBw) {
+  const total = Math.max(1, parseInt(totalBw) || 100);
+  const dnsBw = Math.max(1, Math.round(total * 0.05));
+  const voipBw = Math.max(1, Math.round(total * 0.10));
+  const clientBw = Math.max(1, total - dnsBw - voipBw);
   switch (step) {
     case 1: return [
       { path: '/ip/dns/set', params: { servers: serverIp, 'allow-remote-requests': 'yes' } },
@@ -1654,10 +1658,10 @@ function getStepCommandsV6(step, serverIp) {
       { path: '/ip/firewall/mangle/add', params: { chain: 'forward', protocol: 'udp', 'dst-port': '5060-5061', action: 'mark-packet', 'new-packet-mark': 'voip-priority', passthrough: 'no', comment: 'NetAdmin: VoIP prioridad' } },
     ];
     case 5: return [
-      { path: '/queue/tree/add', params: { name: 'Total-Download', parent: 'global', 'max-limit': '100M', comment: 'NetAdmin: BW total' } },
-      { path: '/queue/tree/add', params: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': '5M' } },
-      { path: '/queue/tree/add', params: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': '10M' } },
-      { path: '/queue/tree/add', params: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': '90M' } },
+      { path: '/queue/tree/add', params: { name: 'Total-Download', parent: 'global', 'max-limit': `${total}M`, comment: `NetAdmin: BW total ${total}M` } },
+      { path: '/queue/tree/add', params: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': `${dnsBw}M` } },
+      { path: '/queue/tree/add', params: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': `${voipBw}M` } },
+      { path: '/queue/tree/add', params: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': `${clientBw}M` } },
     ];
     case 6: return [
       { path: '/ppp/profile/add', params: { name: 'plan-10mbps', 'rate-limit': '10M/10M', 'dns-server': serverIp, comment: 'NetAdmin: Plan 10Mbps' } },
@@ -1684,7 +1688,11 @@ function getStepCommandsV6(step, serverIp) {
 }
 
 // Step commands for REST API (v7)
-function getStepCommandsV7(step, serverIp) {
+function getStepCommandsV7(step, serverIp, totalBw) {
+  const total = Math.max(1, parseInt(totalBw) || 100);
+  const dnsBw = Math.max(1, Math.round(total * 0.05));
+  const voipBw = Math.max(1, Math.round(total * 0.10));
+  const clientBw = Math.max(1, total - dnsBw - voipBw);
   switch (step) {
     case 1: return [
       { method: 'POST', endpoint: '/rest/ip/dns/set', body: { servers: serverIp, 'allow-remote-requests': 'yes' } },
@@ -1706,10 +1714,10 @@ function getStepCommandsV7(step, serverIp) {
       { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'forward', protocol: 'udp', 'dst-port': '5060-5061', action: 'mark-packet', 'new-packet-mark': 'voip-priority', passthrough: 'no', comment: 'NetAdmin: VoIP prioridad' } },
     ];
     case 5: return [
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Total-Download', parent: 'global', 'max-limit': '100M', comment: 'NetAdmin: BW total' } },
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': '5M' } },
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': '10M' } },
-      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': '90M' } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Total-Download', parent: 'global', 'max-limit': `${total}M`, comment: `NetAdmin: BW total ${total}M` } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': `${dnsBw}M` } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': `${voipBw}M` } },
+      { method: 'PUT', endpoint: '/rest/queue/tree', body: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': `${clientBw}M` } },
     ];
     case 6: return [
       { method: 'PUT', endpoint: '/rest/ppp/profile', body: { name: 'plan-10mbps', 'rate-limit': '10M/10M', 'dns-server': serverIp, comment: 'NetAdmin: Plan 10Mbps' } },
@@ -1875,10 +1883,12 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
     const parts = cmd.split(':');
     const stepNum = parseInt(parts[1]);
     const serverIp = parts[2] || config.host;
+    // Optional 4th parameter: total bandwidth in Mbps (used by step:5 Queue Tree)
+    const totalBw = parts[3] ? parseInt(parts[3]) : undefined;
 
     if (isApiProtocol) {
       // RouterOS API protocol
-      const stepCmds = getStepCommandsV6(stepNum, serverIp);
+      const stepCmds = getStepCommandsV6(stepNum, serverIp, totalBw);
       if (stepCmds.length === 0) { results.push({ cmd, success: false, error: `Paso ${stepNum} no definido` }); continue; }
       let api;
       try {
@@ -1910,7 +1920,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
       // REST API v7
       const agent = new https.Agent({ rejectUnauthorized: false });
       const baseUrl = `https://${config.host}:${config.port}`;
-      const stepCmds = getStepCommandsV7(stepNum, serverIp);
+      const stepCmds = getStepCommandsV7(stepNum, serverIp, totalBw);
       if (stepCmds.length === 0) { results.push({ cmd, success: false, error: `Paso ${stepNum} no definido` }); continue; }
       let allOk = true;
       const stepResults = [];

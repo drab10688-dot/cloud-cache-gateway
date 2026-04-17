@@ -105,7 +105,11 @@ export function MikroTikPanel() {
   const executeStep = async (step: number) => {
     setStepStatus(prev => ({ ...prev, [step]: { loading: true, result: 'idle', message: 'Ejecutando...' } }));
     try {
-      const result = await mikrotikDeviceApi.execute([`step:${step}:${serverIp}`]);
+      // Para step:5 (Queue Tree) enviamos también el ancho de banda total configurado
+      const cmd = step === 5
+        ? `step:${step}:${serverIp}:${totalBandwidth}`
+        : `step:${step}:${serverIp}`;
+      const result = await mikrotikDeviceApi.execute([cmd]);
       if (result.success) {
         setStepStatus(prev => ({ ...prev, [step]: { loading: false, result: 'success', message: result.message || `${stepLabels[step]} aplicado correctamente` } }));
       } else {
