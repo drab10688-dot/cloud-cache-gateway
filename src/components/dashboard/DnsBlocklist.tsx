@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Shield, Plus, Trash2, Search, Baby, AlertTriangle, Globe, RefreshCw, Clock, CheckCircle, Loader2, Upload, FileText, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -117,9 +117,11 @@ export function DnsBlocklist() {
   const [newDomain, setNewDomain] = useState("");
   const [newCategory, setNewCategory] = useState<FilterCategory>("manual");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterCat, setFilterCat] = useState<FilterCategory>("all");
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(200);
 
   // Upload state
   const [uploadCategory, setUploadCategory] = useState<FilterCategory>("mintic");
@@ -127,6 +129,17 @@ export function DnsBlocklist() {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Debounce search input to avoid filtering huge lists on every keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Reset pagination when filter or search changes
+  useEffect(() => {
+    setVisibleCount(200);
+  }, [debouncedSearch, filterCat]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -235,11 +248,17 @@ export function DnsBlocklist() {
     handleFileUpload(e.dataTransfer.files);
   };
 
-  const filtered = blocklist.filter((b) => {
-    const matchSearch = b.domain.includes(search.toLowerCase());
-    const matchCat = filterCat === "all" || b.category === filterCat;
-    return matchSearch && matchCat;
-  });
+  // Memoized filter — avoids re-computing across thousands of items on every render
+  const filtered = useMemo(() => {
+    const q = debouncedSearch.toLowerCase();
+    return blocklist.filter((b) => {
+      const matchSearch = !q || b.domain.includes(q);
+      const matchCat = filterCat === "all" || b.category === filterCat;
+      return matchSearch && matchCat;
+    });
+  }, [blocklist, debouncedSearch, filterCat]);
+
+  const visibleItems = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
 
   const totalQueries = adguardStats?.num_dns_queries || "—";
   const blockedQueries = adguardStats?.num_blocked_filtering || "—";
@@ -433,7 +452,7 @@ export function DnsBlocklist() {
         </div>
 
         <div className="space-y-2 max-h-[400px] overflow-y-auto">
-          {filtered.map((item) => (
+          {visibleItems.map((item) => (
             <div key={item.domain} className="flex items-center justify-between px-4 py-3 rounded-md border border-border bg-secondary/50">
               <div className="flex items-center gap-3">
                 <Shield className="h-4 w-4 text-warning" />
@@ -446,6 +465,16 @@ export function DnsBlocklist() {
             </div>
           ))}
           {filtered.length === 0 && <p className="text-center text-sm text-muted-foreground py-8">No hay dominios bloqueados. Agrega uno arriba.</p>}
+          {visibleItems.length < filtered.length && (
+            <div className="flex flex-col items-center gap-2 py-3 border-t border-border mt-2">
+              <p className="text-xs text-muted-foreground">
+                Mostrando <span className="font-mono text-foreground">{visibleItems.length.toLocaleString()}</span> de <span className="font-mono text-foreground">{filtered.length.toLocaleString()}</span> dominios
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setVisibleCount((c) => c + 500)}>
+                Cargar 500 más
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </div>
