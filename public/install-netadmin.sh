@@ -2649,6 +2649,19 @@ cd ${NETADMIN_DIR}
 # Clean any orphan containers from previous installs
 docker ps -a --filter "name=netadmin-" -q | xargs -r docker rm -f 2>/dev/null || true
 
+# ── FIX RED: limpiar bridges Docker huérfanos (causa de "Connection reset" en reinstalaciones) ──
+log "Limpiando bridges Docker huérfanos..."
+docker network rm netadmin_netadmin 2>/dev/null || true
+docker network prune -f >/dev/null 2>&1 || true
+for br in $(ip link show type bridge 2>/dev/null | grep -oE "br-[a-f0-9]+" | sort -u); do
+  if ! docker network ls --format '{{.ID}}' 2>/dev/null | grep -q "${br#br-}"; then
+    ip link set "$br" down 2>/dev/null || true
+    ip link delete "$br" type bridge 2>/dev/null || true
+  fi
+done
+systemctl restart docker
+sleep 5
+
 docker compose build --quiet
 docker compose up -d --remove-orphans
 docker compose stop cloudflared 2>/dev/null || true
