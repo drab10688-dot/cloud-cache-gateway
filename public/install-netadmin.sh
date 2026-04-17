@@ -346,6 +346,25 @@ server:
     use-syslog: no
     statistics-interval: 0
     extended-statistics: no
+
+# === FORWARD ZONE (UDP plano para velocidad máxima) ===
+# Se incluye archivo separado y editable sin tocar unbound.conf
+include: /etc/unbound/forward-records.conf
+EOF
+
+# Generar forward-records.conf con UDP plano (Cloudflare + Google)
+# Sin DoT para minimizar latencia (overhead TLS handshake ~300ms eliminado)
+cat > ${NETADMIN_DIR}/configs/forward-records.conf << 'EOF'
+# Forward DNS upstream — UDP plano para velocidad máxima
+# Editable desde el panel NetAdmin (DNS Config) o manualmente.
+# Para volver a DoT, cambia a forward-tls-upstream: yes y usa @853#hostname
+forward-zone:
+    name: "."
+    forward-first: no
+    forward-addr: 1.1.1.1        # Cloudflare primario
+    forward-addr: 1.0.0.1        # Cloudflare secundario
+    forward-addr: 8.8.8.8        # Google primario
+    forward-addr: 8.8.4.4        # Google secundario
 EOF
 
 # ============================================================
@@ -1175,11 +1194,12 @@ app.get('/api/dns/config', (req, res) => {
 app.post('/api/dns/config', (req, res) => {
   try {
     const { primary, secondary } = req.body;
-    // Save config
+    // Save config metadata
     fs.writeFileSync(DNS_CONFIG_FILE, JSON.stringify({ primary, secondary, updated: new Date().toISOString() }));
-    // Update Unbound forward zone
-    const fwdConf = `forward-zone:\n  name: "."\n  forward-addr: ${primary}\n  forward-addr: ${secondary}\n`;
-    fs.writeFileSync('/data/unbound/forward.conf', fwdConf);
+    // Update Unbound forward-records.conf (UDP plano para velocidad máxima)
+    const fwdConf = `# Forward DNS upstream — gestionado desde NetAdmin\n# Última actualización: ${new Date().toISOString()}\nforward-zone:\n    name: "."\n    forward-first: no\n    forward-addr: ${primary}\n    forward-addr: ${secondary}\n`;
+    // Path real: el archivo está montado desde ./configs/forward-records.conf
+    fs.writeFileSync('/app/configs/forward-records.conf', fwdConf);
     // Restart Unbound to apply
     execSync('docker restart netadmin-unbound 2>/dev/null || true');
     res.json({ success: true, primary, secondary });
@@ -2053,6 +2073,7 @@ services:
     volumes:
       - ./configs/unbound.conf:/etc/unbound/unbound.conf:ro
       - ./configs/root.hints:/etc/unbound/root.hints:ro
+      - ./configs/forward-records.conf:/etc/unbound/forward-records.conf:rw
       - ./data/unbound:/var/lib/unbound
     networks:
       netadmin:
@@ -2216,6 +2237,7 @@ services:
       - ./data/squid-logs:/data/squid-logs:ro
       - ./data/cron-logs:/data/cron-logs:ro
       - ./data:/data/tunnel:rw
+      - ./configs:/app/configs:rw
       - ${NETADMIN_DIR}:/host-data:ro
     depends_on:
       - adguard
