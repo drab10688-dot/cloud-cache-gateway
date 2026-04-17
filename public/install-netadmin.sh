@@ -396,7 +396,7 @@ dns:
   protection_enabled: true
   filtering_enabled: true
   upstream_dns:
-    - 172.20.0.10:5335
+    - 172.20.0.10
   fallback_dns:
     - 9.9.9.10
     - 149.112.112.10
@@ -436,7 +436,7 @@ user_rules:
   - '||suros.xyz^$important'
 ADGUARD_CONF2
 
-success "AdGuard Home configurado → Unbound 172.20.0.10:5335"
+success "AdGuard Home configurado → Unbound 172.20.0.10 (puerto 53)"
 
 # ============================================================
 # 4. CONFIGURACIÓN SQUID SSL BUMP
