@@ -20,9 +20,19 @@ const STEP_FOR: Record<ImprovementKey, number> = {
 };
 
 // Apply: usa step alias — mismo mecanismo que MikroTikPanel (que sí funciona).
-export function buildApplyCommands(key: ImprovementKey, serverIp: string): string[] {
+// Para fqcodel, opcionalmente se puede pasar wanIface (5to parámetro del step).
+export function buildApplyCommands(
+  key: ImprovementKey,
+  serverIp: string,
+  wanIface?: string,
+): string[] {
   const step = STEP_FOR[key];
-  return [`step:${step}:${serverIp || "127.0.0.1"}`];
+  const ip = serverIp || "127.0.0.1";
+  if (key === "fqcodel" && wanIface) {
+    // Format: step:N:serverIp:totalBw:wanIface  (totalBw vacío para no afectar)
+    return [`step:${step}:${ip}::${wanIface}`];
+  }
+  return [`step:${step}:${ip}`];
 }
 
 // Rollback: REST-based. El backend ya conoce este passthrough.
