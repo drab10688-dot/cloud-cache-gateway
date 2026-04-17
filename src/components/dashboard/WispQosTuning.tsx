@@ -103,6 +103,43 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
   const [cpuUsage, setCpuUsage] = useState<number | null>(null);
   const [polling, setPolling] = useState(false);
 
+  // ── WAN interface selector (for FQ_CODEL) ──
+  const WAN_STORAGE_KEY = "wisp-qos-wan-iface";
+  const [interfaces, setInterfaces] = useState<Array<{ name: string; type: string; running: boolean }>>([]);
+  const [loadingIfaces, setLoadingIfaces] = useState(false);
+  const [ifaceError, setIfaceError] = useState<string | null>(null);
+  const [wanIface, setWanIface] = useState<string>(() => localStorage.getItem(WAN_STORAGE_KEY) || "ether1");
+
+  const persistWan = (name: string) => {
+    setWanIface(name);
+    localStorage.setItem(WAN_STORAGE_KEY, name);
+  };
+
+  const fetchInterfaces = useCallback(async () => {
+    setLoadingIfaces(true);
+    setIfaceError(null);
+    try {
+      const result = await mikrotikDeviceApi.execute(["interfaces:list"]);
+      const payload = Array.isArray(result.results)
+        ? result.results.find((entry: any) => entry.cmd === "interfaces:list")
+        : null;
+      if (!payload?.success) {
+        throw new Error(payload?.error || result.error || "No se pudieron obtener las interfaces");
+      }
+      const raw = Array.isArray(payload.result) ? payload.result : [];
+      const ifaces = raw.map((r: any) => ({
+        name: r.name || r["default-name"] || r[".id"] || "unknown",
+        type: r.type || (typeof r.name === "string" && r.name.startsWith("ether") ? "ethernet" : "unknown"),
+        running: r.running === "true" || r.running === true || r.running === "yes",
+      }));
+      setInterfaces(ifaces);
+    } catch (e: any) {
+      setIfaceError(e?.message || "No se pudieron obtener las interfaces");
+    } finally {
+      setLoadingIfaces(false);
+    }
+  }, []);
+
   const [bufferTests, setBufferTests] = useState<BufferbloatResult[]>(
     TARGETS.map(t => ({ target: t.host, label: t.label, status: "idle" }))
   );
