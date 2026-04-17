@@ -9,6 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { mikrotikDeviceApi, MikroTikApiError } from "@/lib/mikrotik-api";
+import {
+  APPLY_COMMANDS,
+  ROLLBACK_COMMANDS,
+  DETECT_PROBES,
+} from "@/lib/wisp-qos-commands";
 
 type ImprovementKey = "mss" | "quic" | "conntrack" | "fqcodel";
 
