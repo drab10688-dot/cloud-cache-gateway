@@ -9,6 +9,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { mikrotikDeviceApi, MikroTikApiError } from "@/lib/mikrotik-api";
+import {
+  APPLY_COMMANDS,
+  ROLLBACK_COMMANDS,
+  DETECT_PROBES,
+} from "@/lib/wisp-qos-commands";
 
 type ImprovementKey = "mss" | "quic" | "conntrack" | "fqcodel";
 
@@ -102,22 +107,29 @@ export function WispQosTuning({ connected }: { connected: boolean }) {
   );
   const [testRunning, setTestRunning] = useState(false);
 
-  // ── Detect improvement status ──
+  // ── Detect improvement status via real REST GETs ──
   const detectStatus = useCallback(async () => {
     if (!connected) return;
-    try {
-      const res = await mikrotikDeviceApi.execute(["wisp:detect-status"]);
-      if (res.success && Array.isArray(res.results)) {
-        const map: Record<string, boolean> = {};
-        res.results.forEach((r: any) => { map[r.key] = !!r.active; });
-        setImprovements(prev => ({
-          mss: { ...prev.mss, active: map.mss ?? prev.mss.active },
-          quic: { ...prev.quic, active: map.quic ?? prev.quic.active },
-          conntrack: { ...prev.conntrack, active: map.conntrack ?? prev.conntrack.active },
-          fqcodel: { ...prev.fqcodel, active: map.fqcodel ?? prev.fqcodel.active },
-        }));
+    const updates: Partial<Record<ImprovementKey, boolean>> = {};
+    for (const probe of DETECT_PROBES) {
+      try {
+        const res = await mikrotikDeviceApi.execute([probe.cmd]);
+        const row = Array.isArray(res.results) ? res.results[0] : null;
+        // Backend returns either { data: [...] } or the array directly in `data`/`result`
+        const rawRows =
+          (row && (row.data ?? row.result ?? row.rows ?? row)) ?? [];
+        const rows = Array.isArray(rawRows) ? rawRows : [];
+        updates[probe.key] = probe.match(rows);
+      } catch {
+        // keep previous state on network/endpoint failure
       }
-    } catch {/* offline */}
+    }
+    setImprovements(prev => ({
+      mss: { ...prev.mss, active: updates.mss ?? prev.mss.active },
+      quic: { ...prev.quic, active: updates.quic ?? prev.quic.active },
+      conntrack: { ...prev.conntrack, active: updates.conntrack ?? prev.conntrack.active },
+      fqcodel: { ...prev.fqcodel, active: updates.fqcodel ?? prev.fqcodel.active },
+    }));
   }, [connected]);
 
   // ── CPU polling ──
@@ -143,8 +155,7 @@ export function WispQosTuning({ connected }: { connected: boolean }) {
     return () => clearInterval(id);
   }, [polling, connected, fetchCpu]);
 
-  // ── Apply / rollback ──
-  // Extracts a meaningful error from the backend response (per-command results or top-level error)
+  // ── Apply / rollback (via real REST commands) ──
   const extractError = (res: any, fallback: string): string => {
     if (!res) return fallback;
     if (typeof res.error === "string" && res.error.trim()) return res.error;
@@ -155,49 +166,58 @@ export function WispQosTuning({ connected }: { connected: boolean }) {
       }
     }
     if (typeof res.message === "string" && res.message.trim()) return res.message;
-    return `${fallback} — el backend no devolvió detalle. Verifica que /api/mikrotik/execute soporte el alias "wisp:*" o actualiza el panel del VPS.`;
+    return `${fallback} — el backend no devolvió detalle.`;
+  };
+
+  const runBatch = async (commands: string[]) => {
+    // Execute commands one-by-one so a single failure doesn't abort the whole batch,
+    // and we can surface the first real error to the user.
+    const errors: string[] = [];
+    let anyOk = false;
+    for (const cmd of commands) {
+      try {
+        const res = await mikrotikDeviceApi.execute([cmd]);
+        if (res.success) {
+          anyOk = true;
+        } else {
+          errors.push(extractError(res, "Error"));
+        }
+      } catch (e: any) {
+        const msg = e instanceof MikroTikApiError ? `${e.message} (HTTP ${e.status})` : (e?.message || "Error de conexión");
+        errors.push(msg);
+      }
+    }
+    return { ok: anyOk && errors.length === 0, errors, anyOk };
   };
 
   const applyImprovement = async (key: ImprovementKey) => {
-    setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined } }));
-    try {
-      const res = await mikrotikDeviceApi.execute([`wisp:apply:${key}`]);
-      const ok = res.success === true;
-      setImprovements(prev => ({
-        ...prev,
-        [key]: {
-          loading: false,
-          active: ok ? true : prev[key].active,
-          lastMessage: ok ? `${IMPROVEMENT_META[key].title} aplicado ✓` : undefined,
-          lastError: ok ? undefined : extractError(res, "Error al aplicar"),
-        },
-      }));
-      if (ok) detectStatus();
-    } catch (e: any) {
-      const msg = e instanceof MikroTikApiError ? `${e.message} (HTTP ${e.status})` : (e?.message || "Error de conexión");
-      setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: false, lastError: msg } }));
-    }
+    setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined, lastMessage: undefined } }));
+    const { ok, errors } = await runBatch(APPLY_COMMANDS[key]);
+    setImprovements(prev => ({
+      ...prev,
+      [key]: {
+        loading: false,
+        active: ok ? true : prev[key].active,
+        lastMessage: ok ? `${IMPROVEMENT_META[key].title} aplicado ✓` : undefined,
+        lastError: ok ? undefined : (errors[0] || "Error al aplicar"),
+      },
+    }));
+    if (ok) detectStatus();
   };
 
   const rollbackImprovement = async (key: ImprovementKey) => {
-    setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined } }));
-    try {
-      const res = await mikrotikDeviceApi.execute([`wisp:rollback:${key}`]);
-      const ok = res.success === true;
-      setImprovements(prev => ({
-        ...prev,
-        [key]: {
-          loading: false,
-          active: ok ? false : prev[key].active,
-          lastMessage: ok ? `${IMPROVEMENT_META[key].title} revertido` : undefined,
-          lastError: ok ? undefined : extractError(res, "Error al revertir"),
-        },
-      }));
-      if (ok) detectStatus();
-    } catch (e: any) {
-      const msg = e instanceof MikroTikApiError ? `${e.message} (HTTP ${e.status})` : (e?.message || "Error de conexión");
-      setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: false, lastError: msg } }));
-    }
+    setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined, lastMessage: undefined } }));
+    const { ok, errors } = await runBatch(ROLLBACK_COMMANDS[key]);
+    setImprovements(prev => ({
+      ...prev,
+      [key]: {
+        loading: false,
+        active: ok ? false : prev[key].active,
+        lastMessage: ok ? `${IMPROVEMENT_META[key].title} revertido` : undefined,
+        lastError: ok ? undefined : (errors[0] || "Error al revertir"),
+      },
+    }));
+    if (ok) detectStatus();
   };
 
   const applyAll = async () => {
