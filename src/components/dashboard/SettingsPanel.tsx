@@ -205,7 +205,7 @@ export function SettingsPanel() {
             )}
             <Button onClick={handleUpdatePanel} disabled={updatingPanel} variant="outline" className="w-full gap-2">
               {updatingPanel ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {updatingPanel ? "Compilando panel..." : "Actualizar Panel Web"}
+              {updatingPanel ? "Actualizando panel + API..." : "Actualizar Panel + Backend API"}
             </Button>
           </div>
 
