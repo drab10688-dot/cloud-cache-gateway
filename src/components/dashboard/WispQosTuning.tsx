@@ -183,18 +183,19 @@ export function WispQosTuning({ connected }: { connected: boolean }) {
     setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined } }));
     try {
       const res = await mikrotikDeviceApi.execute([`wisp:rollback:${key}`]);
+      const ok = res.success === true;
       setImprovements(prev => ({
         ...prev,
         [key]: {
           loading: false,
-          active: res.success ? false : prev[key].active,
-          lastMessage: res.success ? `${IMPROVEMENT_META[key].title} revertido` : undefined,
-          lastError: res.success ? undefined : (res.error || "Error desconocido"),
+          active: ok ? false : prev[key].active,
+          lastMessage: ok ? `${IMPROVEMENT_META[key].title} revertido` : undefined,
+          lastError: ok ? undefined : extractError(res, "Error al revertir"),
         },
       }));
-      if (res.success) detectStatus();
+      if (ok) detectStatus();
     } catch (e: any) {
-      const msg = e instanceof MikroTikApiError ? e.message : "Error de conexión";
+      const msg = e instanceof MikroTikApiError ? `${e.message} (HTTP ${e.status})` : (e?.message || "Error de conexión");
       setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: false, lastError: msg } }));
     }
   };
