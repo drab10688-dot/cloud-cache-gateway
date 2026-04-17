@@ -11,9 +11,7 @@ import { Progress } from "@/components/ui/progress";
 import { mikrotikDeviceApi, MikroTikApiError } from "@/lib/mikrotik-api";
 import {
   buildApplyCommands,
-  buildApplyFallbackCommands,
   buildRollbackCommands,
-  isStepNotDefinedError,
   DETECT_PROBES,
 } from "@/lib/wisp-qos-commands";
 
@@ -195,26 +193,15 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
   const applyImprovement = async (key: ImprovementKey) => {
     setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined, lastMessage: undefined } }));
 
-    // 1) Try the step alias first (preferred — same path MikroTikPanel uses).
-    let { ok, errors } = await runBatch(buildApplyCommands(key, serverIp));
-
-    // 2) If the backend doesn't know that step, fall back to raw REST commands.
-    let usedFallback = false;
-    if (!ok && errors.some(isStepNotDefinedError)) {
-      usedFallback = true;
-      const fb = await runBatch(buildApplyFallbackCommands(key, serverIp));
-      ok = fb.ok;
-      errors = fb.errors;
-    }
+    // Usa SIEMPRE step alias — mismo mecanismo que MikroTikPanel (que sí funciona).
+    const { ok, errors } = await runBatch(buildApplyCommands(key, serverIp));
 
     setImprovements(prev => ({
       ...prev,
       [key]: {
         loading: false,
         active: ok ? true : prev[key].active,
-        lastMessage: ok
-          ? `${IMPROVEMENT_META[key].title} aplicado ✓${usedFallback ? " (REST)" : ""}`
-          : undefined,
+        lastMessage: ok ? `${IMPROVEMENT_META[key].title} aplicado ✓` : undefined,
         lastError: ok ? undefined : (errors[0] || "Error al aplicar"),
       },
     }));
