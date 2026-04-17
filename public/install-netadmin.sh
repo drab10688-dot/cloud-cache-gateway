@@ -1714,6 +1714,23 @@ function getStepCommandsV7(step, serverIp) {
     case 6: return [
       { method: 'PUT', endpoint: '/rest/ppp/profile', body: { name: 'plan-10mbps', 'rate-limit': '10M/10M', 'dns-server': serverIp, comment: 'NetAdmin: Plan 10Mbps' } },
     ];
+    case 7: return [
+      { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'forward', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': 'clamp-to-pmtu', passthrough: 'yes', comment: 'NetAdmin: MSS Clamp forward' } },
+      { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': 'clamp-to-pmtu', passthrough: 'yes', comment: 'NetAdmin: MSS Clamp postrouting' } },
+    ];
+    case 8: return [
+      { method: 'POST', endpoint: '/rest/ip/firewall/connection/tracking/set', body: { 'udp-timeout': '30s', 'udp-stream-timeout': '120s', 'icmp-timeout': '10s', 'generic-timeout': '120s', 'tcp-close-timeout': '10s', 'tcp-close-wait-timeout': '10s', 'tcp-fin-wait-timeout': '10s', 'tcp-last-ack-timeout': '10s', 'tcp-time-wait-timeout': '10s', 'tcp-syn-sent-timeout': '30s', 'tcp-syn-received-timeout': '10s', 'tcp-established-timeout': '7200s' } },
+    ];
+    case 9: return [
+      { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', action: 'change-ttl', 'new-ttl': 'set:64', passthrough: 'yes', comment: 'NetAdmin Stealth: TTL normalize 64' } },
+      { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'forward', action: 'change-ttl', 'new-ttl': 'set:64', passthrough: 'yes', comment: 'NetAdmin Stealth: TTL forward 64' } },
+      { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'tcp', 'connection-limit': '200,32', action: 'drop', comment: 'NetAdmin Stealth: Limit TCP conn' } },
+      { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'connection-limit': '100,32', action: 'drop', comment: 'NetAdmin Stealth: Limit UDP conn' } },
+      { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': '1360', passthrough: 'yes', comment: 'NetAdmin Stealth: Uniform MSS 1360' } },
+    ];
+    case 10: return [
+      { method: 'PUT', endpoint: '/rest/queue/type', body: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024', comment: 'NetAdmin WISP: FQ_CODEL type' } },
+    ];
     default: return [];
   }
 }
