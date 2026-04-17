@@ -450,6 +450,38 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
                       <StatusDot active={state.active} />
                     </div>
                     <p className="text-xs text-muted-foreground mb-2">{meta.desc}</p>
+                    {key === "fqcodel" && (
+                      <div className="mb-2 flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-muted-foreground">Interfaz WAN:</span>
+                        <Select value={wanIface} onValueChange={persistWan} disabled={!connected || loadingIfaces}>
+                          <SelectTrigger className="h-7 text-xs w-[180px]">
+                            <SelectValue placeholder={loadingIfaces ? "Cargando..." : "Selecciona WAN"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {interfaces.length === 0 && (
+                              <SelectItem value={wanIface}>{wanIface} (sin lista)</SelectItem>
+                            )}
+                            {interfaces.map(i => (
+                              <SelectItem key={i.name} value={i.name}>
+                                {i.name}{i.running ? " · ●" : ""} {i.type !== "unknown" ? `(${i.type})` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={fetchInterfaces}
+                          disabled={!connected || loadingIfaces}
+                          className="h-7 text-xs px-2"
+                        >
+                          {loadingIfaces ? <Loader2 className="h-3 w-3 animate-spin" /> : "Recargar"}
+                        </Button>
+                        {ifaceError && (
+                          <span className="text-xs text-destructive">{ifaceError}</span>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
                       <Button
                         size="sm"
