@@ -10,8 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { mikrotikDeviceApi, MikroTikApiError } from "@/lib/mikrotik-api";
 import {
-  APPLY_COMMANDS,
-  ROLLBACK_COMMANDS,
+  buildApplyCommands,
+  buildRollbackCommands,
   DETECT_PROBES,
 } from "@/lib/wisp-qos-commands";
 
@@ -91,7 +91,7 @@ function gradeColor(g?: string) {
   }
 }
 
-export function WispQosTuning({ connected }: { connected: boolean }) {
+export function WispQosTuning({ connected, serverIp }: { connected: boolean; serverIp: string }) {
   const [improvements, setImprovements] = useState<Record<ImprovementKey, ImprovementState>>({
     mss: { loading: false, active: null },
     quic: { loading: false, active: null },
@@ -192,7 +192,7 @@ export function WispQosTuning({ connected }: { connected: boolean }) {
 
   const applyImprovement = async (key: ImprovementKey) => {
     setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined, lastMessage: undefined } }));
-    const { ok, errors } = await runBatch(APPLY_COMMANDS[key]);
+    const { ok, errors } = await runBatch(buildApplyCommands(key, serverIp));
     setImprovements(prev => ({
       ...prev,
       [key]: {
@@ -207,7 +207,7 @@ export function WispQosTuning({ connected }: { connected: boolean }) {
 
   const rollbackImprovement = async (key: ImprovementKey) => {
     setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined, lastMessage: undefined } }));
-    const { ok, errors } = await runBatch(ROLLBACK_COMMANDS[key]);
+    const { ok, errors } = await runBatch(buildRollbackCommands(key));
     setImprovements(prev => ({
       ...prev,
       [key]: {
