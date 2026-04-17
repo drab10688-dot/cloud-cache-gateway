@@ -1856,6 +1856,17 @@ http {
             client_max_body_size 50m;
         }
 
+        # Long-running system ops (update-docker, update-panel): 10 min timeout
+        location /api/system/ {
+            proxy_pass http://netadmin-api:4000;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_connect_timeout 600s;
+            proxy_read_timeout 600s;
+            proxy_send_timeout 600s;
+            proxy_buffering off;
+        }
+
         location /api/ {
             proxy_pass http://netadmin-api:4000;
             proxy_set_header Host \$host;
