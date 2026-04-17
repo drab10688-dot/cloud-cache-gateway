@@ -1138,13 +1138,13 @@ function ensureCloudflaredContainer(token) {
     }
     return;
   }
-  // Quick Tunnel: use docker compose — SAME method as 'netadmin-tunnel start' (proven to work)
+  // Quick Tunnel: use docker compose with `--profile manual` (cloudflared is in that profile)
   if (containerExists('netadmin-cloudflared')) {
     sh('docker rm -f netadmin-cloudflared 2>&1');
   }
-  const composeOut = sh('cd /opt/netadmin && docker compose up -d cloudflared 2>&1');
+  const composeOut = sh('cd /opt/netadmin && docker compose --profile manual up -d cloudflared 2>&1');
   if (!containerExists('netadmin-cloudflared')) {
-    throw new Error('docker compose up -d cloudflared falló. Salida:\n' + (composeOut || 'vacío'));
+    throw new Error('docker compose --profile manual up -d cloudflared falló. Salida:\n' + (composeOut || 'vacío'));
   }
 }
 
@@ -1753,8 +1753,9 @@ function getStepCommandsV6(step, serverIp, totalBw, wanIface) {
     ];
     case 10: {
       const iface = wanIface || 'ether1';
+      // NOTE: /queue/type does NOT accept `comment` (neither v6 nor v7) — would fail with "unknown parameter comment"
       return [
-        { path: '/queue/type/add', params: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024', comment: 'NetAdmin WISP: FQ_CODEL type' } },
+        { path: '/queue/type/add', params: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024' } },
         { path: '/queue/interface/add', params: { interface: iface, 'queue': 'fq-codel-wan', comment: `NetAdmin WISP: FQ_CODEL on ${iface}` } },
       ];
     }
@@ -1813,8 +1814,9 @@ function getStepCommandsV7(step, serverIp, totalBw, wanIface) {
     ];
     case 10: {
       const iface = wanIface || 'ether1';
+      // NOTE: /queue/type does NOT accept `comment` (neither v6 nor v7) — would fail with "unknown parameter comment"
       return [
-        { method: 'PUT', endpoint: '/rest/queue/type', body: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024', comment: 'NetAdmin WISP: FQ_CODEL type' } },
+        { method: 'PUT', endpoint: '/rest/queue/type', body: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024' } },
         { method: 'PUT', endpoint: '/rest/queue/interface', body: { interface: iface, queue: 'fq-codel-wan', comment: `NetAdmin WISP: FQ_CODEL on ${iface}` } },
       ];
     }
