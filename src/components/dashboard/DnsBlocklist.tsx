@@ -95,8 +95,20 @@ function normalizeDomainInput(value: string): string {
     .replace(/\/.*$/, "")
     .replace(/:.*$/, "")
     .replace(/^\|\|/, "")
-    .replace(/\^$/, "")
+    .replace(/\^(\$important)?$/, "")
+    .replace(/\$important$/, "")
     .replace(/^\.+|\.+$/g, "");
+}
+
+// Convert a clean domain to an AdGuard blocking rule.
+// Format: ||domain^$important — blocks domain + subdomains, overrides allowlists.
+function toAdGuardRule(domain: string): string {
+  return `||${domain}^$important`;
+}
+
+// Extract the bare domain from an AdGuard rule (or return as-is if already plain).
+function ruleToDomain(rule: string): string {
+  return normalizeDomainInput(rule);
 }
 
 export function DnsBlocklist() {
