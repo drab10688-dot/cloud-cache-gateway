@@ -1098,8 +1098,14 @@ function ensureCloudflaredContainer(token) {
   if (containerExists('netadmin-cloudflared')) {
     sh('docker rm -f netadmin-cloudflared 2>&1');
   }
-  // Detect compose network
-  const network = sh("docker network ls --format '{{.Name}}' | grep netadmin || echo netadmin_default").split('\n')[0] || 'netadmin_default';
+  // Detect compose network — prefer the one the API itself is attached to
+  let network = '';
+  try {
+    network = sh("docker inspect netadmin-api --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}'").trim().split('\n')[0] || '';
+  } catch {}
+  if (!network) {
+    network = sh("docker network ls --format '{{.Name}}' | grep -E '^netadmin' | head -1").trim() || 'netadmin_default';
+  }
   const baseRun = `docker run -d --name netadmin-cloudflared --restart unless-stopped --network ${network} cloudflare/cloudflared:latest`;
   const cmd = token && token.trim()
     ? `${baseRun} tunnel --no-autoupdate run --token ${token.trim()}`
@@ -2490,7 +2496,7 @@ services:
       - PANEL_PASS=${PANEL_PASS}
       - ADGUARD_URL=http://netadmin-adguard:3000
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
       - /proc:/host-proc:ro
       - /sbin/iptables:/sbin/iptables:ro
       - /sbin/iptables-save:/sbin/iptables-save:ro
