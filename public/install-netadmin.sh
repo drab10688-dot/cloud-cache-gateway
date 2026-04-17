@@ -2086,6 +2086,8 @@ API_JS
 cat > ${NETADMIN_DIR}/api/Dockerfile << 'DOCKERFILE'
 FROM node:20-alpine
 WORKDIR /app
+# Install docker-cli + docker-compose so the API can manage Cloudflare tunnel and other containers
+RUN apk add --no-cache docker-cli docker-cli-compose curl bash
 COPY package.json .
 RUN npm install --production --silent
 COPY server.js .
