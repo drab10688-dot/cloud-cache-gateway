@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { mikrotikDeviceApi, getDevice, type MikroTikDevice, MikroTikApiError } from "@/lib/mikrotik-api";
 import { stepLabels } from "@/lib/mikrotik-commands";
+import { WispQosTuning } from "./WispQosTuning";
 
 interface StepStatus {
   loading: boolean;
@@ -304,6 +305,9 @@ export function MikroTikPanel() {
           </p>
         </div>
       </div>
+
+      {/* WISP QoS Tuning - Submenú con Estado/Aplicar/Test/CAKE */}
+      <WispQosTuning connected={connected} />
 
       {/* Architecture diagram */}
       <div className="card-glow rounded-lg p-5 mb-6 border-2 border-primary/30">
