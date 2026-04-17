@@ -1142,13 +1142,29 @@ function ensureCloudflaredContainer(token) {
     }
     return;
   }
-  // Quick Tunnel: use docker compose with `--profile manual` (cloudflared is in that profile)
+  // Quick Tunnel: docker run direct (más confiable que compose --profile)
   if (containerExists('netadmin-cloudflared')) {
     sh('docker rm -f netadmin-cloudflared 2>&1');
   }
-  const composeOut = sh('cd /opt/netadmin && docker compose --profile manual up -d cloudflared 2>&1');
+  // Asegurar imagen disponible
+  const pullOut = sh('docker pull cloudflare/cloudflared:latest 2>&1');
+  // Detectar red de netadmin (la misma que usa la API)
+  let network = '';
+  try {
+    network = sh("docker inspect netadmin-api --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}'").split('\n')[0].trim() || '';
+  } catch {}
+  if (!network) {
+    network = sh("docker network ls --format '{{.Name}}' | grep -E '^netadmin' | head -1").trim() || 'netadmin_default';
+  }
+  const cmd = `docker run -d --name netadmin-cloudflared --restart unless-stopped --network ${network} cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://netadmin-nginx:80`;
+  const runOut = sh(cmd);
   if (!containerExists('netadmin-cloudflared')) {
-    throw new Error('docker compose --profile manual up -d cloudflared falló. Salida:\n' + (composeOut || 'vacío'));
+    throw new Error(
+      'No se pudo crear cloudflared (Quick Tunnel).\n' +
+      'Red usada: ' + network + '\n' +
+      'docker pull: ' + (pullOut.split('\n').slice(-3).join(' | ') || 'sin salida') + '\n' +
+      'docker run: ' + (runOut || 'sin salida')
+    );
   }
 }
 
