@@ -11,7 +11,9 @@ import { Progress } from "@/components/ui/progress";
 import { mikrotikDeviceApi, MikroTikApiError } from "@/lib/mikrotik-api";
 import {
   buildApplyCommands,
+  buildApplyFallbackCommands,
   buildRollbackCommands,
+  isStepNotDefinedError,
   DETECT_PROBES,
 } from "@/lib/wisp-qos-commands";
 
