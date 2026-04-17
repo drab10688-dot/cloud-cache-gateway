@@ -58,8 +58,8 @@ export function SettingsPanel() {
       } else {
         setUpdateMsg({ type: "error", text: result.error || "Error al actualizar" });
       }
-    } catch {
-      setUpdateMsg({ type: "error", text: "Error de conexión con el servidor" });
+    } catch (e: any) {
+      setUpdateMsg({ type: "error", text: e?.message || "Error de conexión con el servidor" });
     } finally {
       setUpdating(false);
     }
@@ -76,8 +76,8 @@ export function SettingsPanel() {
       } else {
         setPanelMsg({ type: "error", text: result.error || "Error al actualizar el panel" });
       }
-    } catch {
-      setPanelMsg({ type: "error", text: "Error de conexión con el servidor" });
+    } catch (e: any) {
+      setPanelMsg({ type: "error", text: e?.message || "Error de conexión con el servidor" });
     } finally {
       setUpdatingPanel(false);
     }
