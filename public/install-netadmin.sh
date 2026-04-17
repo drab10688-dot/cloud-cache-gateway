@@ -1632,7 +1632,11 @@ app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
 });
 
 // Step commands for API protocol (v6 compatible — uses CLI-style paths)
-function getStepCommandsV6(step, serverIp) {
+function getStepCommandsV6(step, serverIp, totalBw) {
+  const total = Math.max(1, parseInt(totalBw) || 100);
+  const dnsBw = Math.max(1, Math.round(total * 0.05));
+  const voipBw = Math.max(1, Math.round(total * 0.10));
+  const clientBw = Math.max(1, total - dnsBw - voipBw);
   switch (step) {
     case 1: return [
       { path: '/ip/dns/set', params: { servers: serverIp, 'allow-remote-requests': 'yes' } },
@@ -1654,10 +1658,10 @@ function getStepCommandsV6(step, serverIp) {
       { path: '/ip/firewall/mangle/add', params: { chain: 'forward', protocol: 'udp', 'dst-port': '5060-5061', action: 'mark-packet', 'new-packet-mark': 'voip-priority', passthrough: 'no', comment: 'NetAdmin: VoIP prioridad' } },
     ];
     case 5: return [
-      { path: '/queue/tree/add', params: { name: 'Total-Download', parent: 'global', 'max-limit': '100M', comment: 'NetAdmin: BW total' } },
-      { path: '/queue/tree/add', params: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': '5M' } },
-      { path: '/queue/tree/add', params: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': '10M' } },
-      { path: '/queue/tree/add', params: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': '90M' } },
+      { path: '/queue/tree/add', params: { name: 'Total-Download', parent: 'global', 'max-limit': `${total}M`, comment: `NetAdmin: BW total ${total}M` } },
+      { path: '/queue/tree/add', params: { name: 'DNS-Priority', parent: 'Total-Download', 'packet-mark': 'dns-priority', priority: '1', 'max-limit': `${dnsBw}M` } },
+      { path: '/queue/tree/add', params: { name: 'VoIP-Priority', parent: 'Total-Download', 'packet-mark': 'voip-priority', priority: '2', 'max-limit': `${voipBw}M` } },
+      { path: '/queue/tree/add', params: { name: 'Client-Traffic', parent: 'Total-Download', 'packet-mark': 'client-packets', priority: '5', 'max-limit': `${clientBw}M` } },
     ];
     case 6: return [
       { path: '/ppp/profile/add', params: { name: 'plan-10mbps', 'rate-limit': '10M/10M', 'dns-server': serverIp, comment: 'NetAdmin: Plan 10Mbps' } },
