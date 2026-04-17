@@ -95,8 +95,20 @@ function normalizeDomainInput(value: string): string {
     .replace(/\/.*$/, "")
     .replace(/:.*$/, "")
     .replace(/^\|\|/, "")
-    .replace(/\^$/, "")
+    .replace(/\^(\$important)?$/, "")
+    .replace(/\$important$/, "")
     .replace(/^\.+|\.+$/g, "");
+}
+
+// Convert a clean domain to an AdGuard blocking rule.
+// Format: ||domain^$important — blocks domain + subdomains, overrides allowlists.
+function toAdGuardRule(domain: string): string {
+  return `||${domain}^$important`;
+}
+
+// Extract the bare domain from an AdGuard rule (or return as-is if already plain).
+function ruleToDomain(rule: string): string {
+  return normalizeDomainInput(rule);
 }
 
 export function DnsBlocklist() {
@@ -123,8 +135,8 @@ export function DnsBlocklist() {
         api.getAdGuardStats().catch(() => null),
         api.getBlocklistUpdateStatus().catch(() => null),
       ]);
-      const mapped: BlockedDomain[] = (domains as string[]).map((d: string) => ({
-        domain: d, reason: "Lista local", category: "manual" as FilterCategory, active: true,
+      const mapped: BlockedDomain[] = (domains as string[]).map((raw: string) => ({
+        domain: ruleToDomain(raw), reason: "Lista local", category: "manual" as FilterCategory, active: true,
       }));
       setBlocklist(mapped);
       setAdguardStats(stats);
@@ -138,7 +150,8 @@ export function DnsBlocklist() {
     const normalized = normalizeDomainInput(newDomain);
     if (!normalized) return;
     try {
-      await api.addToBlocklist(normalized);
+      // Send AdGuard rule format: ||domain^$important
+      await api.addToBlocklist(toAdGuardRule(normalized));
       const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
       setBlocklist([{ domain: normalized, reason: reasons[newCategory] || "Manual", category: newCategory, active: true }, ...blocklist.filter(item => item.domain !== normalized)]);
       setNewDomain("");
@@ -147,9 +160,13 @@ export function DnsBlocklist() {
 
   const removeDomain = async (domain: string) => {
     try {
-      await api.removeFromBlocklist(domain);
+      // Backend should accept either the bare domain or the rule; send rule for an exact match.
+      await api.removeFromBlocklist(toAdGuardRule(domain));
       setBlocklist(blocklist.filter(b => b.domain !== domain));
-    } catch {}
+    } catch {
+      // Fallback: try removing by bare domain (for legacy entries)
+      try { await api.removeFromBlocklist(domain); setBlocklist(blocklist.filter(b => b.domain !== domain)); } catch {}
+    }
   };
 
   const triggerUpdate = async () => {
@@ -189,7 +206,7 @@ export function DnsBlocklist() {
             continue;
           }
           try {
-            await api.addToBlocklist(domain);
+            await api.addToBlocklist(toAdGuardRule(domain));
             existingDomains.add(domain);
             totalAdded++;
           } catch {
