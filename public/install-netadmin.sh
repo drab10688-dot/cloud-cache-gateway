@@ -1668,7 +1668,7 @@ app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
 });
 
 // Step commands for API protocol (v6 compatible — uses CLI-style paths)
-function getStepCommandsV6(step, serverIp, totalBw) {
+function getStepCommandsV6(step, serverIp, totalBw, wanIface) {
   const total = Math.max(1, parseInt(totalBw) || 100);
   const dnsBw = Math.max(1, Math.round(total * 0.05));
   const voipBw = Math.max(1, Math.round(total * 0.10));
