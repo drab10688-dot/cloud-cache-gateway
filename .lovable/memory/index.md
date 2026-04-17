@@ -10,6 +10,7 @@ Base path: `/opt/netadmin/` with `/web` and `/data`.
 Auth: Bearer token via `/data/tunnel/panel-pass.txt` (except `/api/speedtest/*`).
 Architecture: VPS handles DNS/Cache, MikroTik handles routing, BBR forcing (QUIC block), and QoS.
 Security: Port 53 restricted to private subnets via UFW.
+Installer MUST set ip_forward=1, br_netfilter, UFW FORWARD=ACCEPT, and clean orphan Docker bridges before `compose up` — otherwise nginx unreachable (Connection reset).
 Client management (PPPoE/RADIUS/WireGuard/billing) lives in user's OTHER system — never build it here.
 
 ## Memories
@@ -30,3 +31,4 @@ Client management (PPPoE/RADIUS/WireGuard/billing) lives in user's OTHER system 
 - [Telegram Alerts](mem://features/telegram-alerts) — WAN state and packet loss alerts via Telegram bot
 - [Architecture Stack](mem://architecture/stack) — Dockerized Node.js API, AdGuard, Unbound, Lancache, Squid
 - [MikroTik Active Control](mem://features/mikrotik-active-control) — RouterOS v6/v7 config, QoS, MSS clamping, Stealth Mode
+- [Docker Network Fix](mem://features/docker-network-fix) — Installer kernel/UFW/orphan-bridge cleanup to prevent Connection reset
