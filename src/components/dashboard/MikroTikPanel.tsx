@@ -307,7 +307,7 @@ export function MikroTikPanel() {
       </div>
 
       {/* WISP QoS Tuning - Submenú con Estado/Aplicar/Test/CAKE */}
-      <WispQosTuning connected={connected} />
+      <WispQosTuning connected={connected} serverIp={serverIp} />
 
       {/* Architecture diagram */}
       <div className="card-glow rounded-lg p-5 mb-6 border-2 border-primary/30">
