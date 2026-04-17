@@ -40,17 +40,25 @@ export function CloudflarePanel() {
         await api.stopTunnel();
         setTunnelActive(false);
         setTunnelUrl("");
+        toast.success("Túnel desactivado");
       } else {
-        // Use custom token only if user opted in and provided one
         const token = useCustomToken && customToken.trim() ? customToken.trim() : undefined;
         const result = await api.startTunnel(token);
         setTunnelActive(true);
         setTunnelUrl(result.url || "");
-        if (!result.url) {
+        if (result.url) {
+          toast.success("Túnel activo");
+        } else {
+          toast.info("Túnel iniciado, esperando URL...");
           setTimeout(fetchStatus, 8000);
         }
       }
-    } catch { /* error */ }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Error desconocido al activar el túnel";
+      toast.error(msg, { duration: 10000 });
+      // Re-sync state from backend
+      fetchStatus();
+    }
     setLoading(false);
   };
 
