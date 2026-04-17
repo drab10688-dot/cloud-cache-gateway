@@ -31,3 +31,4 @@ Client management (PPPoE/RADIUS/WireGuard/billing) lives in user's OTHER system 
 - [Telegram Alerts](mem://features/telegram-alerts) — WAN state and packet loss alerts via Telegram bot
 - [Architecture Stack](mem://architecture/stack) — Dockerized Node.js API, AdGuard, Unbound, Lancache, Squid
 - [MikroTik Active Control](mem://features/mikrotik-active-control) — RouterOS v6/v7 config, QoS, MSS clamping, Stealth Mode
+- [Docker Network Fix](mem://features/docker-network-fix) — Installer kernel/UFW/orphan-bridge cleanup to prevent Connection reset
