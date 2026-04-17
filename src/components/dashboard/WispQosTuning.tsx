@@ -107,22 +107,29 @@ export function WispQosTuning({ connected }: { connected: boolean }) {
   );
   const [testRunning, setTestRunning] = useState(false);
 
-  // ── Detect improvement status ──
+  // ── Detect improvement status via real REST GETs ──
   const detectStatus = useCallback(async () => {
     if (!connected) return;
-    try {
-      const res = await mikrotikDeviceApi.execute(["wisp:detect-status"]);
-      if (res.success && Array.isArray(res.results)) {
-        const map: Record<string, boolean> = {};
-        res.results.forEach((r: any) => { map[r.key] = !!r.active; });
-        setImprovements(prev => ({
-          mss: { ...prev.mss, active: map.mss ?? prev.mss.active },
-          quic: { ...prev.quic, active: map.quic ?? prev.quic.active },
-          conntrack: { ...prev.conntrack, active: map.conntrack ?? prev.conntrack.active },
-          fqcodel: { ...prev.fqcodel, active: map.fqcodel ?? prev.fqcodel.active },
-        }));
+    const updates: Partial<Record<ImprovementKey, boolean>> = {};
+    for (const probe of DETECT_PROBES) {
+      try {
+        const res = await mikrotikDeviceApi.execute([probe.cmd]);
+        const row = Array.isArray(res.results) ? res.results[0] : null;
+        // Backend returns either { data: [...] } or the array directly in `data`/`result`
+        const rawRows =
+          (row && (row.data ?? row.result ?? row.rows ?? row)) ?? [];
+        const rows = Array.isArray(rawRows) ? rawRows : [];
+        updates[probe.key] = probe.match(rows);
+      } catch {
+        // keep previous state on network/endpoint failure
       }
-    } catch {/* offline */}
+    }
+    setImprovements(prev => ({
+      mss: { ...prev.mss, active: updates.mss ?? prev.mss.active },
+      quic: { ...prev.quic, active: updates.quic ?? prev.quic.active },
+      conntrack: { ...prev.conntrack, active: updates.conntrack ?? prev.conntrack.active },
+      fqcodel: { ...prev.fqcodel, active: updates.fqcodel ?? prev.fqcodel.active },
+    }));
   }, [connected]);
 
   // ── CPU polling ──
