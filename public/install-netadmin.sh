@@ -1728,7 +1728,7 @@ function getStepCommandsV6(step, serverIp, totalBw, wanIface) {
 }
 
 // Step commands for REST API (v7)
-function getStepCommandsV7(step, serverIp, totalBw) {
+function getStepCommandsV7(step, serverIp, totalBw, wanIface) {
   const total = Math.max(1, parseInt(totalBw) || 100);
   const dnsBw = Math.max(1, Math.round(total * 0.05));
   const voipBw = Math.max(1, Math.round(total * 0.10));
