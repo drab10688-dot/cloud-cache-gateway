@@ -1934,7 +1934,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
 
     if (isApiProtocol) {
       // RouterOS API protocol
-      const stepCmds = getStepCommandsV6(stepNum, serverIp, totalBw);
+      const stepCmds = getStepCommandsV6(stepNum, serverIp, totalBw, wanIface);
       if (stepCmds.length === 0) { results.push({ cmd, success: false, error: `Paso ${stepNum} no definido` }); continue; }
       let api;
       try {
@@ -1966,7 +1966,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
       // REST API v7
       const agent = new https.Agent({ rejectUnauthorized: false });
       const baseUrl = `https://${config.host}:${config.port}`;
-      const stepCmds = getStepCommandsV7(stepNum, serverIp, totalBw);
+      const stepCmds = getStepCommandsV7(stepNum, serverIp, totalBw, wanIface);
       if (stepCmds.length === 0) { results.push({ cmd, success: false, error: `Paso ${stepNum} no definido` }); continue; }
       let allOk = true;
       const stepResults = [];
