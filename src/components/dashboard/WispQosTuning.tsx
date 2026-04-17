@@ -192,7 +192,7 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
 
   const applyImprovement = async (key: ImprovementKey) => {
     setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined, lastMessage: undefined } }));
-    const { ok, errors } = await runBatch(APPLY_COMMANDS[key]);
+    const { ok, errors } = await runBatch(buildApplyCommands(key, serverIp));
     setImprovements(prev => ({
       ...prev,
       [key]: {
