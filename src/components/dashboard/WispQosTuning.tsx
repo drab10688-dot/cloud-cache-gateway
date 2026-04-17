@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { mikrotikDeviceApi, MikroTikApiError } from "@/lib/mikrotik-api";
 import {
   buildApplyCommands,
@@ -102,6 +103,43 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
   const [cpuUsage, setCpuUsage] = useState<number | null>(null);
   const [polling, setPolling] = useState(false);
 
+  // ── WAN interface selector (for FQ_CODEL) ──
+  const WAN_STORAGE_KEY = "wisp-qos-wan-iface";
+  const [interfaces, setInterfaces] = useState<Array<{ name: string; type: string; running: boolean }>>([]);
+  const [loadingIfaces, setLoadingIfaces] = useState(false);
+  const [ifaceError, setIfaceError] = useState<string | null>(null);
+  const [wanIface, setWanIface] = useState<string>(() => localStorage.getItem(WAN_STORAGE_KEY) || "ether1");
+
+  const persistWan = (name: string) => {
+    setWanIface(name);
+    localStorage.setItem(WAN_STORAGE_KEY, name);
+  };
+
+  const fetchInterfaces = useCallback(async () => {
+    setLoadingIfaces(true);
+    setIfaceError(null);
+    try {
+      const result = await mikrotikDeviceApi.execute(["interfaces:list"]);
+      const payload = Array.isArray(result.results)
+        ? result.results.find((entry: any) => entry.cmd === "interfaces:list")
+        : null;
+      if (!payload?.success) {
+        throw new Error(payload?.error || result.error || "No se pudieron obtener las interfaces");
+      }
+      const raw = Array.isArray(payload.result) ? payload.result : [];
+      const ifaces = raw.map((r: any) => ({
+        name: r.name || r["default-name"] || r[".id"] || "unknown",
+        type: r.type || (typeof r.name === "string" && r.name.startsWith("ether") ? "ethernet" : "unknown"),
+        running: r.running === "true" || r.running === true || r.running === "yes",
+      }));
+      setInterfaces(ifaces);
+    } catch (e: any) {
+      setIfaceError(e?.message || "No se pudieron obtener las interfaces");
+    } finally {
+      setLoadingIfaces(false);
+    }
+  }, []);
+
   const [bufferTests, setBufferTests] = useState<BufferbloatResult[]>(
     TARGETS.map(t => ({ target: t.host, label: t.label, status: "idle" }))
   );
@@ -147,7 +185,8 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
     if (!connected) return;
     detectStatus();
     fetchCpu();
-  }, [connected, detectStatus, fetchCpu]);
+    fetchInterfaces();
+  }, [connected, detectStatus, fetchCpu, fetchInterfaces]);
 
   useEffect(() => {
     if (!polling || !connected) return;
@@ -194,7 +233,7 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
     setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined, lastMessage: undefined } }));
 
     // Usa SIEMPRE step alias — mismo mecanismo que MikroTikPanel (que sí funciona).
-    const { ok, errors } = await runBatch(buildApplyCommands(key, serverIp));
+    const { ok, errors } = await runBatch(buildApplyCommands(key, serverIp, key === "fqcodel" ? wanIface : undefined));
 
     setImprovements(prev => ({
       ...prev,
@@ -411,6 +450,38 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
                       <StatusDot active={state.active} />
                     </div>
                     <p className="text-xs text-muted-foreground mb-2">{meta.desc}</p>
+                    {key === "fqcodel" && (
+                      <div className="mb-2 flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-muted-foreground">Interfaz WAN:</span>
+                        <Select value={wanIface} onValueChange={persistWan} disabled={!connected || loadingIfaces}>
+                          <SelectTrigger className="h-7 text-xs w-[180px]">
+                            <SelectValue placeholder={loadingIfaces ? "Cargando..." : "Selecciona WAN"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {interfaces.length === 0 && (
+                              <SelectItem value={wanIface}>{wanIface} (sin lista)</SelectItem>
+                            )}
+                            {interfaces.map(i => (
+                              <SelectItem key={i.name} value={i.name}>
+                                {i.name}{i.running ? " · ●" : ""} {i.type !== "unknown" ? `(${i.type})` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={fetchInterfaces}
+                          disabled={!connected || loadingIfaces}
+                          className="h-7 text-xs px-2"
+                        >
+                          {loadingIfaces ? <Loader2 className="h-3 w-3 animate-spin" /> : "Recargar"}
+                        </Button>
+                        {ifaceError && (
+                          <span className="text-xs text-destructive">{ifaceError}</span>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
                       <Button
                         size="sm"

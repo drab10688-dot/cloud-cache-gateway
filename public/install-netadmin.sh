@@ -1668,7 +1668,7 @@ app.post('/api/mikrotik/test', requireAuth, async (req, res) => {
 });
 
 // Step commands for API protocol (v6 compatible — uses CLI-style paths)
-function getStepCommandsV6(step, serverIp, totalBw) {
+function getStepCommandsV6(step, serverIp, totalBw, wanIface) {
   const total = Math.max(1, parseInt(totalBw) || 100);
   const dnsBw = Math.max(1, Math.round(total * 0.05));
   const voipBw = Math.max(1, Math.round(total * 0.10));
@@ -1716,16 +1716,19 @@ function getStepCommandsV6(step, serverIp, totalBw) {
       { path: '/ip/firewall/filter/add', params: { chain: 'forward', protocol: 'udp', 'connection-limit': '100,32', action: 'drop', comment: 'NetAdmin Stealth: Limit UDP conn' } },
       { path: '/ip/firewall/mangle/add', params: { chain: 'postrouting', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': '1360', passthrough: 'yes', comment: 'NetAdmin Stealth: Uniform MSS 1360' } },
     ];
-    case 10: return [
-      { path: '/queue/type/add', params: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024', comment: 'NetAdmin WISP: FQ_CODEL type' } },
-      { path: '/queue/interface/add', params: { interface: 'ether1', 'queue': 'fq-codel-wan', comment: 'NetAdmin WISP: FQ_CODEL on WAN' } },
-    ];
+    case 10: {
+      const iface = wanIface || 'ether1';
+      return [
+        { path: '/queue/type/add', params: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024', comment: 'NetAdmin WISP: FQ_CODEL type' } },
+        { path: '/queue/interface/add', params: { interface: iface, 'queue': 'fq-codel-wan', comment: `NetAdmin WISP: FQ_CODEL on ${iface}` } },
+      ];
+    }
     default: return [];
   }
 }
 
 // Step commands for REST API (v7)
-function getStepCommandsV7(step, serverIp, totalBw) {
+function getStepCommandsV7(step, serverIp, totalBw, wanIface) {
   const total = Math.max(1, parseInt(totalBw) || 100);
   const dnsBw = Math.max(1, Math.round(total * 0.05));
   const voipBw = Math.max(1, Math.round(total * 0.10));
@@ -1773,10 +1776,13 @@ function getStepCommandsV7(step, serverIp, totalBw) {
       { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'connection-limit': '100,32', action: 'drop', comment: 'NetAdmin Stealth: Limit UDP conn' } },
       { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': '1360', passthrough: 'yes', comment: 'NetAdmin Stealth: Uniform MSS 1360' } },
     ];
-    case 10: return [
-      { method: 'PUT', endpoint: '/rest/queue/type', body: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024', comment: 'NetAdmin WISP: FQ_CODEL type' } },
-      { method: 'PUT', endpoint: '/rest/queue/interface', body: { interface: 'ether1', queue: 'fq-codel-wan', comment: 'NetAdmin WISP: FQ_CODEL on WAN' } },
-    ];
+    case 10: {
+      const iface = wanIface || 'ether1';
+      return [
+        { method: 'PUT', endpoint: '/rest/queue/type', body: { name: 'fq-codel-wan', kind: 'fq-codel', 'fq-codel-target': '5ms', 'fq-codel-interval': '100ms', 'fq-codel-quantum': '1514', 'fq-codel-limit': '10240', 'fq-codel-flows': '1024', comment: 'NetAdmin WISP: FQ_CODEL type' } },
+        { method: 'PUT', endpoint: '/rest/queue/interface', body: { interface: iface, queue: 'fq-codel-wan', comment: `NetAdmin WISP: FQ_CODEL on ${iface}` } },
+      ];
+    }
     default: return [];
   }
 }
@@ -1922,11 +1928,13 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
     const stepNum = parseInt(parts[1]);
     const serverIp = parts[2] || config.host;
     // Optional 4th parameter: total bandwidth in Mbps (used by step:5 Queue Tree)
+    // Optional 5th parameter: WAN interface name (used by step:10 FQ_CODEL)
     const totalBw = parts[3] ? parseInt(parts[3]) : undefined;
+    const wanIface = parts[4] || undefined;
 
     if (isApiProtocol) {
       // RouterOS API protocol
-      const stepCmds = getStepCommandsV6(stepNum, serverIp, totalBw);
+      const stepCmds = getStepCommandsV6(stepNum, serverIp, totalBw, wanIface);
       if (stepCmds.length === 0) { results.push({ cmd, success: false, error: `Paso ${stepNum} no definido` }); continue; }
       let api;
       try {
@@ -1958,7 +1966,7 @@ app.post('/api/mikrotik/execute', requireAuth, async (req, res) => {
       // REST API v7
       const agent = new https.Agent({ rejectUnauthorized: false });
       const baseUrl = `https://${config.host}:${config.port}`;
-      const stepCmds = getStepCommandsV7(stepNum, serverIp, totalBw);
+      const stepCmds = getStepCommandsV7(stepNum, serverIp, totalBw, wanIface);
       if (stepCmds.length === 0) { results.push({ cmd, success: false, error: `Paso ${stepNum} no definido` }); continue; }
       let allOk = true;
       const stepResults = [];
