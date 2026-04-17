@@ -20,35 +20,20 @@ const TAG_FQCODEL_NAME = "fq-codel-wan";
 // Map each improvement to the backend step alias that already works.
 // `serverIp` is unused by these particular steps but the backend accepts
 // the format `step:N:<anything>` and ignores it for steps 3, 7, 8.
-const STEP_FOR: Record<ImprovementKey, number | null> = {
+const STEP_FOR: Record<ImprovementKey, number> = {
   mss: 7,        // MSS Clamping
   quic: 3,       // Bloquear QUIC + HTTP/3
   conntrack: 8,  // Connection Tracking tuning
-  fqcodel: null, // No backend step — uses raw REST (v7 only)
+  fqcodel: 10,   // FQ_CODEL queue type
 };
 
 const enc = (obj: Record<string, unknown>) => JSON.stringify(obj);
 
 // Build apply command list for a given improvement, given a serverIp.
+// All keys use backend step aliases (works on RouterOS v6 + v7).
 export function buildApplyCommands(key: ImprovementKey, serverIp: string): string[] {
   const step = STEP_FOR[key];
-  if (step !== null) {
-    // Use the working alias — same path as MikroTikPanel.
-    return [`step:${step}:${serverIp || "127.0.0.1"}`];
-  }
-  // fqcodel — no step exists, fall back to REST (works on v7 only)
-  return [
-    `PUT /rest/queue/type ${enc({
-      name: TAG_FQCODEL_NAME,
-      kind: "fq-codel",
-      "fq-codel-target": "5ms",
-      "fq-codel-interval": "100ms",
-      "fq-codel-quantum": "1514",
-      "fq-codel-limit": "10240",
-      "fq-codel-flows": "1024",
-      comment: "NetAdmin WISP: FQ_CODEL type",
-    })}`,
-  ];
+  return [`step:${step}:${serverIp || "127.0.0.1"}`];
 }
 
 // Rollback: REST-based. Will work on v7; on v6 the UI surfaces the error.
