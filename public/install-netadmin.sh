@@ -1688,7 +1688,11 @@ function getStepCommandsV6(step, serverIp, totalBw) {
 }
 
 // Step commands for REST API (v7)
-function getStepCommandsV7(step, serverIp) {
+function getStepCommandsV7(step, serverIp, totalBw) {
+  const total = Math.max(1, parseInt(totalBw) || 100);
+  const dnsBw = Math.max(1, Math.round(total * 0.05));
+  const voipBw = Math.max(1, Math.round(total * 0.10));
+  const clientBw = Math.max(1, total - dnsBw - voipBw);
   switch (step) {
     case 1: return [
       { method: 'POST', endpoint: '/rest/ip/dns/set', body: { servers: serverIp, 'allow-remote-requests': 'yes' } },
