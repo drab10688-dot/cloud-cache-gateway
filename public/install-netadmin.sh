@@ -1047,49 +1047,109 @@ setInterval(() => {
 
 // === CLOUDFLARE TUNNEL ===
 const TUNNEL_URL_FILE = '/data/tunnel/tunnel-url.txt';
+const TUNNEL_TOKEN_FILE = '/data/tunnel/cf-token.txt';
+
+function sh(cmd) {
+  try { return execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim(); }
+  catch (e) { return ''; }
+}
+
+function containerExists(name) {
+  return sh(`docker ps -a --format '{{.Names}}' | grep -x ${name} || true`) === name;
+}
+function containerRunning(name) {
+  return sh(`docker ps --format '{{.Names}}' | grep -x ${name} || true`) === name;
+}
+
+function readTunnelLogs() {
+  return sh('docker logs netadmin-cloudflared 2>&1 | tail -n 300');
+}
+
+function extractUrlFromLogs(logs) {
+  const m = logs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
+  return m && m.length ? m[m.length - 1] : '';
+}
 
 function getTunnelUrl() {
-  // Try file first
-  try { 
+  try {
     const url = fs.readFileSync(TUNNEL_URL_FILE, 'utf8').trim();
     if (url) return url;
   } catch {}
-  // Try from docker logs
-  try {
-    const logs = execSync('docker logs netadmin-cloudflared 2>&1').toString();
-    const match = logs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
-    if (match && match.length > 0) {
-      const url = match[match.length - 1];
+  const url = extractUrlFromLogs(readTunnelLogs());
+  if (url) { try { fs.writeFileSync(TUNNEL_URL_FILE, url); } catch {} }
+  return url;
+}
+
+async function waitForTunnelUrl(timeoutMs = 25000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const url = extractUrlFromLogs(readTunnelLogs());
+    if (url) {
       try { fs.writeFileSync(TUNNEL_URL_FILE, url); } catch {}
       return url;
     }
-  } catch {}
+    await new Promise(r => setTimeout(r, 1500));
+  }
   return '';
+}
+
+function ensureCloudflaredContainer(token) {
+  // Remove old container if exists (so we can re-create with fresh args)
+  if (containerExists('netadmin-cloudflared')) {
+    sh('docker rm -f netadmin-cloudflared 2>&1');
+  }
+  // Detect compose network
+  const network = sh("docker network ls --format '{{.Name}}' | grep netadmin || echo netadmin_default").split('\n')[0] || 'netadmin_default';
+  const baseRun = `docker run -d --name netadmin-cloudflared --restart unless-stopped --network ${network} cloudflare/cloudflared:latest`;
+  const cmd = token && token.trim()
+    ? `${baseRun} tunnel --no-autoupdate run --token ${token.trim()}`
+    : `${baseRun} tunnel --no-autoupdate --url http://netadmin-nginx:80`;
+  const out = sh(cmd);
+  if (!out) throw new Error('No se pudo crear el contenedor cloudflared. Revisa: docker logs netadmin-cloudflared');
 }
 
 app.get('/api/tunnel/status', async (req, res) => {
   try {
-    const containers = await docker.listContainers({ all: true });
-    const cf = containers.find(c => c.Names.some(n => n === '/netadmin-cloudflared'));
-    const active = cf ? cf.State === 'running' : false;
+    const exists = containerExists('netadmin-cloudflared');
+    const active = exists && containerRunning('netadmin-cloudflared');
     const url = active ? getTunnelUrl() : '';
-    res.json({ active, url, state: cf?.State || 'not_created' });
+    res.json({ active, url, state: exists ? (active ? 'running' : 'stopped') : 'not_created' });
   } catch { res.json({ active: false, url: '' }); }
 });
 
 app.post('/api/tunnel/start', async (req, res) => {
   try {
-    execSync('docker start netadmin-cloudflared 2>/dev/null || true');
-    // Wait for tunnel to establish
-    await new Promise(r => setTimeout(r, 8000));
-    const url = getTunnelUrl();
+    const token = (req.body && req.body.token) ? String(req.body.token).trim() : '';
+    if (token) {
+      try { fs.writeFileSync(TUNNEL_TOKEN_FILE, token); } catch {}
+    }
+    // If container doesn't exist or token changed, (re)create it
+    let needRecreate = !containerExists('netadmin-cloudflared');
+    if (!needRecreate && token) {
+      // If user provided a token, always recreate to apply it
+      needRecreate = true;
+    }
+    if (needRecreate) {
+      ensureCloudflaredContainer(token);
+    } else {
+      sh('docker start netadmin-cloudflared 2>&1');
+    }
+    // Quick tunnel: wait & extract URL. With token: no URL needed.
+    let url = '';
+    if (!token) {
+      url = await waitForTunnelUrl(25000);
+      if (!url) {
+        const logs = readTunnelLogs().split('\n').slice(-20).join('\n');
+        return res.status(500).json({ error: 'Túnel iniciado pero no devolvió URL en 25s. Logs:\n' + logs });
+      }
+    }
     res.json({ success: true, url });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/tunnel/stop', async (req, res) => {
   try {
-    execSync('docker stop netadmin-cloudflared 2>/dev/null || true');
+    sh('docker stop netadmin-cloudflared 2>&1');
     try { fs.unlinkSync(TUNNEL_URL_FILE); } catch {}
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
