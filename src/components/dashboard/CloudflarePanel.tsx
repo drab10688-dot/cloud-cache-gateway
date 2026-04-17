@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 export function CloudflarePanel() {
   const [tunnelActive, setTunnelActive] = useState(false);
