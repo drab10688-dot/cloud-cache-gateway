@@ -192,10 +192,10 @@ export function SettingsPanel() {
           <div className="card-glow rounded-lg p-6">
             <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
               <Download className="h-4 w-4 text-primary" />
-              Actualizar Panel Web
+              Actualizar Panel + Backend API
             </h3>
             <p className="text-xs text-muted-foreground mb-4">
-              Descarga la última versión del panel web desde GitHub, compila y despliega automáticamente.
+              Descarga la última versión desde GitHub, compila el panel web <strong>y reconstruye el backend API</strong> (netadmin-api) automáticamente.
             </p>
             {panelMsg && (
               <div className={`flex items-center gap-2 text-xs font-mono p-3 rounded-md mb-4 ${panelMsg.type === "success" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
