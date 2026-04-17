@@ -207,7 +207,7 @@ export function WispQosTuning({ connected, serverIp }: { connected: boolean; ser
 
   const rollbackImprovement = async (key: ImprovementKey) => {
     setImprovements(prev => ({ ...prev, [key]: { ...prev[key], loading: true, lastError: undefined, lastMessage: undefined } }));
-    const { ok, errors } = await runBatch(ROLLBACK_COMMANDS[key]);
+    const { ok, errors } = await runBatch(buildRollbackCommands(key));
     setImprovements(prev => ({
       ...prev,
       [key]: {
