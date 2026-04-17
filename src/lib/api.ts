@@ -21,21 +21,56 @@ export function isAuthenticated() {
   return !!authToken;
 }
 
-async function apiFetch(path: string, options: RequestInit = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${authToken}`,
-      ...options.headers,
-    },
-  });
+async function apiFetch(path: string, options: RequestInit & { timeoutMs?: number } = {}) {
+  const { timeoutMs, ...rest } = options;
+  const controller = new AbortController();
+  const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...rest,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+        ...rest.headers,
+      },
+    });
+  } catch (e: any) {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (e?.name === 'AbortError') {
+      throw new Error(`Timeout (${Math.ceil((timeoutMs || 0) / 1000)}s) — la operación sigue corriendo en el servidor; recarga la página en unos minutos.`);
+    }
+    throw new Error('No se pudo contactar al servidor (red o nginx caído)');
+  }
+  if (timeoutId) clearTimeout(timeoutId);
+
   if (res.status === 401) {
     clearToken();
     window.location.reload();
     throw new Error('No autorizado');
   }
-  return res.json();
+
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = await res.json();
+      detail = body?.error || body?.message || JSON.stringify(body).slice(0, 300);
+    } catch {
+      try { detail = (await res.text()).slice(0, 300); } catch { /* empty */ }
+    }
+    if (res.status === 504 || res.status === 502) {
+      throw new Error(`Gateway timeout (${res.status}) — el build tardó más que nginx. El proceso puede seguir en el servidor; recarga en 2-3 minutos.`);
+    }
+    throw new Error(`HTTP ${res.status}${detail ? ': ' + detail : ''}`);
+  }
+
+  try {
+    return await res.json();
+  } catch {
+    return { success: true };
+  }
 }
 
 // Auth
