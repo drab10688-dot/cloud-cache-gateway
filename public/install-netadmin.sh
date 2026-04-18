@@ -1105,6 +1105,46 @@ app.post('/api/blocklist/bulk-remove', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Devuelve estado de las 4 categorías NetAdmin (count de dominios + si está registrada en AdGuard)
+app.get('/api/blocklist/categories', async (req, res) => {
+  const result = [];
+  let registeredUrls = new Set();
+  try {
+    const filtering = await adguardRequest('/control/filtering/status');
+    registeredUrls = new Set((filtering.filters || []).map(f => f.url));
+  } catch { /* AdGuard caído — devolvemos sólo los counts del disco */ }
+  for (const cat of BLOCKLIST_CATEGORIES) {
+    const url = adguardUrlFor(cat);
+    result.push({
+      category: cat,
+      name: BLOCKLIST_NAMES[cat],
+      url,
+      domain_count: readCategory(cat).length,
+      registered_in_adguard: registeredUrls.has(url),
+    });
+  }
+  res.json(result);
+});
+
+// Garantiza que las 4 listas NetAdmin estén registradas en AdGuard y refresca.
+// El frontend lo llama al hacer clic en cualquier chip NetAdmin (no necesita pasar URL).
+app.post('/api/blocklist/ensure', async (req, res) => {
+  try {
+    await ensureAdguardConfigured();
+    await postAdguard('/control/filtering/refresh', { whitelist: false });
+    const filtering = await adguardRequest('/control/filtering/status');
+    const registeredUrls = new Set((filtering.filters || []).map(f => f.url));
+    const status = BLOCKLIST_CATEGORIES.map(cat => ({
+      category: cat,
+      name: BLOCKLIST_NAMES[cat],
+      url: adguardUrlFor(cat),
+      registered: registeredUrls.has(adguardUrlFor(cat)),
+      domain_count: readCategory(cat).length,
+    }));
+    res.json({ success: true, status });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Borra todos los dominios de una categoría (o todas si se omite)
 app.post('/api/blocklist/clear', async (req, res) => {
   try {
