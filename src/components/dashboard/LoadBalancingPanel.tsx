@@ -126,7 +126,10 @@ function generatePCCScript(wans: string[], bridge: string, lans: string[], failo
     `/interface bridge add name=${bridge} comment="NetAdmin: Bridge LAN balanceo"`,
     ...lans.map(l => `/interface bridge port add bridge=${bridge} interface=${l} comment="NetAdmin: LAN port"`),
     "",
-    "# 2. Mangle: Marcar conexiones por PCC",
+    "# 2. Crear routing-tables (RouterOS v7 — REQUERIDO antes de mark-routing)",
+    ...wans.map((_, i) => `/routing table add name=to_WAN${i + 1} fib disabled=no comment="NetAdmin PCC: Tabla WAN${i + 1}"`),
+    "",
+    "# 3. Mangle: Marcar conexiones por PCC",
   ];
 
   wans.forEach((wan, i) => {
@@ -147,7 +150,7 @@ function generatePCCScript(wans: string[], bridge: string, lans: string[], failo
     );
   });
 
-  lines.push("", "# 3. NAT por cada WAN");
+  lines.push("", "# 4. NAT por cada WAN");
   wans.forEach((wan) => {
     lines.push(
       `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade \\`,
@@ -155,10 +158,10 @@ function generatePCCScript(wans: string[], bridge: string, lans: string[], failo
     );
   });
 
-  lines.push("", "# 4. Rutas por marca de ruteo");
+  lines.push("", "# 5. Rutas por tabla (v7: routing-table=, NO routing-mark=)");
   wans.forEach((wan, i) => {
     lines.push(
-      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-mark=to_WAN${i + 1} \\`,
+      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-table=to_WAN${i + 1} \\`,
       `  check-gateway=ping comment="NetAdmin PCC: Ruta ${wan}"`
     );
   });
@@ -174,6 +177,9 @@ function generateNTHScript(wans: string[], bridge: string, lans: string[], failo
     "",
     `/interface bridge add name=${bridge} comment="NetAdmin: Bridge LAN balanceo"`,
     ...lans.map(l => `/interface bridge port add bridge=${bridge} interface=${l}`),
+    "",
+    "# Crear routing-tables (RouterOS v7 — REQUERIDO)",
+    ...wans.map((_, i) => `/routing table add name=to_WAN${i + 1} fib disabled=no comment="NetAdmin NTH: Tabla WAN${i + 1}"`),
     "",
     "# Mangle NTH",
   ];
@@ -191,15 +197,18 @@ function generateNTHScript(wans: string[], bridge: string, lans: string[], failo
   wans.forEach((wan, i) => {
     lines.push(
       `/ip firewall mangle add chain=prerouting connection-mark=WAN${i + 1}_conn \\`,
-      `  action=mark-routing new-routing-mark=to_WAN${i + 1} passthrough=yes`
+      `  action=mark-routing new-routing-mark=to_WAN${i + 1} passthrough=yes \\`,
+      `  comment="NetAdmin NTH: Ruteo ${wan}"`
     );
   });
 
-  lines.push("", "# NAT y Rutas");
+  lines.push("", "# NAT y Rutas (v7: routing-table=, NO routing-mark=)");
   wans.forEach((wan, i) => {
     lines.push(
-      `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade`,
-      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-mark=to_WAN${i + 1} check-gateway=ping`
+      `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade \\`,
+      `  comment="NetAdmin NTH: NAT ${wan}"`,
+      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-table=to_WAN${i + 1} check-gateway=ping \\`,
+      `  comment="NetAdmin NTH: Ruta ${wan}"`
     );
   });
 
@@ -268,16 +277,35 @@ function generateRoutingScript(
     "",
   ];
 
+  // RouterOS v7: crear las routing-tables ANTES de cualquier mark-routing / routing-table=
+  lines.push("# Crear routing-tables (RouterOS v7)");
+  wans.forEach((wan) => {
+    lines.push(
+      `/routing table add name=to_${wan} fib disabled=no \\`,
+      `  comment="NetAdmin Routing: Tabla ${wan}"`,
+    );
+  });
+  lines.push("");
+
   if (clientType === "pppoe") {
-    lines.push("# Crear perfiles PPPoE por WAN");
+    lines.push("# Crear pools PPPoE (primero los pools, luego los profiles)");
+    wans.forEach((wan, i) => {
+      const count = perWan + (i < remainder ? 1 : 0);
+      const lastOctet = Math.min(254, ((count + 1) % 254) || 254);
+      const thirdOctet = Math.max(0, Math.ceil((count + 1) / 254) - 1);
+      lines.push(
+        `/ip pool add name=pool-${wan} ranges=10.${i + 1}.0.2-10.${i + 1}.${thirdOctet}.${lastOctet} \\`,
+        `  comment="NetAdmin: Pool ${wan} (${count} clientes)"`,
+      );
+    });
+
+    lines.push("", "# Crear perfiles PPPoE por WAN");
     wans.forEach((wan, i) => {
       const count = perWan + (i < remainder ? 1 : 0);
       lines.push(
         `/ppp profile add name=plan-${wan} local-address=10.${i + 1}.0.1 \\`,
         `  remote-address=pool-${wan} dns-server=8.8.8.8 \\`,
         `  comment="NetAdmin Routing: ${count} clientes → ${wan}"`,
-        `/ip pool add name=pool-${wan} ranges=10.${i + 1}.0.2-10.${i + 1}.${Math.min(255, Math.ceil(count / 254))}.${Math.min(254, count)} \\`,
-        `  comment="NetAdmin: Pool ${wan}"`,
       );
     });
 
@@ -311,11 +339,13 @@ function generateRoutingScript(
     });
   }
 
-  lines.push("", "# NAT y Rutas por WAN");
+  lines.push("", "# NAT y Rutas por WAN (v7: usa routing-table=, no routing-mark=)");
   wans.forEach((wan) => {
     lines.push(
-      `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade`,
-      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-mark=to_${wan} check-gateway=ping`,
+      `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade \\`,
+      `  comment="NetAdmin Routing: NAT ${wan}"`,
+      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-table=to_${wan} check-gateway=ping \\`,
+      `  comment="NetAdmin Routing: Ruta ${wan}"`,
     );
   });
 
@@ -1283,6 +1313,17 @@ export function LoadBalancingPanel() {
                 </p>
               </div>
             )}
+
+            <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 mb-4">
+              <p className="text-xs text-foreground leading-relaxed">
+                <strong>⚠️ Antes de aplicar el script (RouterOS v7):</strong> si las interfaces LAN
+                seleccionadas ya pertenecen a otro bridge, debes removerlas primero o el comando fallará con
+                <code className="px-1 mx-1 bg-muted rounded">device already added as bridge port</code>.
+                Ejecuta: <code className="px-1 mx-1 bg-muted rounded">/interface bridge port remove [find interface=ether4]</code>.
+                El script ya crea las <code className="px-1 mx-1 bg-muted rounded">/routing table</code> requeridas en v7
+                y usa <code className="px-1 mx-1 bg-muted rounded">routing-table=</code> en lugar del obsoleto <code className="px-1 mx-1 bg-muted rounded">routing-mark=</code>.
+              </p>
+            </div>
 
             {/* Routing-specific options */}
             {method === "routing" && (
