@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Globe, Plus, Trash2, RefreshCw, Loader2, ExternalLink, CheckCircle, XCircle, Copy, Check } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Globe, Plus, Trash2, RefreshCw, Loader2, ExternalLink, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -15,8 +15,15 @@ interface RemoteFilter {
   last_updated?: string;
 }
 
-// Listas recomendadas (sugerencias rápidas)
-const SUGGESTED_LISTS: { name: string; url: string; description: string }[] = [
+interface SuggestedList {
+  name: string;
+  url: string;
+  description: string;
+  internal?: boolean; // listas NetAdmin servidas localmente
+}
+
+// Listas externas recomendadas
+const EXTERNAL_LISTS: SuggestedList[] = [
   {
     name: "AdGuard DNS filter",
     url: "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
@@ -49,6 +56,20 @@ const SUGGESTED_LISTS: { name: string; url: string; description: string }[] = [
   },
 ];
 
+// Listas internas NetAdmin (servidas por nginx local en /blocklists/netadmin_<cat>.txt)
+const NETADMIN_CATEGORIES: { cat: string; name: string; description: string }[] = [
+  { cat: "manual",    name: "NetAdmin · Lista Manual",         description: "Dominios agregados manualmente desde el panel" },
+  { cat: "mintic",    name: "NetAdmin · MinTIC Colombia",      description: "Resolución MinTIC — bloqueo obligatorio ISP" },
+  { cat: "coljuegos", name: "NetAdmin · Coljuegos Colombia",   description: "Apuestas ilegales según Coljuegos" },
+  { cat: "infantil",  name: "NetAdmin · Protección Infantil",  description: "Contenido no apto para menores" },
+];
+
+// Construye la URL pública navegable que AdGuard puede descargar
+// (mismo origen que el panel — nginx la sirve en /blocklists/)
+function buildNetAdminUrl(cat: string): string {
+  return `${window.location.protocol}//${window.location.host}/blocklists/netadmin_${cat}.txt`;
+}
+
 // Filtros internos NetAdmin (no editables desde aquí — se gestionan en sección de dominios)
 const NETADMIN_INTERNAL_PREFIX = "NetAdmin"; // detecta "NetAdmin · ..." y "NetAdmin — ..." (compat)
 
@@ -64,7 +85,6 @@ export function RemoteBlocklists() {
   const [filters, setFilters] = useState<RemoteFilter[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [publishing, setPublishing] = useState(false);
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
   const [adding, setAdding] = useState(false);
@@ -173,39 +193,16 @@ export function RemoteBlocklists() {
     }
   };
 
-  // Fuerza el registro de las 4 listas internas NetAdmin en AdGuard.
-  // Útil tras una reinstalación o si AdGuard fue reseteado y perdió la config.
-  // Muestra el reporte detallado del backend para depurar si algo falla.
-  const publishNetAdminLists = async () => {
-    setPublishing(true);
-    try {
-      const report: any = await api.repairBlocklist();
-      const okCount = report?.filters?.length || 0;
-      const errCount = report?.errors?.length || 0;
-
-      if (report?.success && okCount === 4) {
-        toast({
-          title: "✅ 4 listas NetAdmin publicadas",
-          description: `Manual, MinTIC, Coljuegos, Infantil registradas en AdGuard`,
-        });
-      } else {
-        // Mostrar el primer error real para que el operador sepa qué pasa
-        const firstError = report?.errors?.[0] || "Causa desconocida";
-        toast({
-          title: `⚠ Solo ${okCount}/4 listas registradas`,
-          description: firstError,
-          variant: "destructive",
-        });
-        // Log completo en consola para depuración
-        console.error('[publishNetAdminLists] Reporte completo:', report);
-      }
-      await fetchFilters();
-    } catch (e: any) {
-      toast({ title: "No se pudo publicar", description: e?.message || "Error", variant: "destructive" });
-    } finally {
-      setPublishing(false);
-    }
-  };
+  // Combinar listas externas + internas NetAdmin como chips recomendados
+  const suggestedLists: SuggestedList[] = useMemo(() => {
+    const internal: SuggestedList[] = NETADMIN_CATEGORIES.map(c => ({
+      name: c.name,
+      url: buildNetAdminUrl(c.cat),
+      description: c.description,
+      internal: true,
+    }));
+    return [...internal, ...EXTERNAL_LISTS];
+  }, []);
 
   // Separar internas vs externas para mostrar en orden
   const externalFilters = filters.filter(f => !f.name?.startsWith(NETADMIN_INTERNAL_PREFIX));
@@ -228,10 +225,6 @@ export function RemoteBlocklists() {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button onClick={publishNetAdminLists} disabled={publishing} variant="default" size="sm" className="gap-2">
-            {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-            Publicar listas NetAdmin
-          </Button>
           <Button onClick={refreshAll} disabled={refreshing} variant="outline" size="sm" className="gap-2">
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Refrescar todas
@@ -260,12 +253,18 @@ export function RemoteBlocklists() {
         </Button>
       </div>
 
-      {/* Sugeridas */}
+      {/* Sugeridas (NetAdmin internas + externas) */}
       <div className="mb-4">
-        <p className="text-xs text-muted-foreground mb-2">Listas recomendadas (clic para agregar):</p>
+        <p className="text-xs text-muted-foreground mb-2">
+          Listas recomendadas <span className="text-foreground/60">(clic para agregar — las "NetAdmin ·" se sirven desde este panel)</span>:
+        </p>
         <div className="flex flex-wrap gap-2">
-          {SUGGESTED_LISTS.map((s) => {
-            const exists = filters.some(f => f.url === s.url);
+          {suggestedLists.map((s) => {
+            // Match por URL exacta o por nombre (las internas pueden cambiar de host)
+            const exists = filters.some(f =>
+              f.url === s.url ||
+              (s.internal && f.name === s.name)
+            );
             return (
               <button
                 key={s.url}
@@ -274,8 +273,12 @@ export function RemoteBlocklists() {
                 title={s.description}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
                   exists
-                    ? "bg-success/10 border-success/30 text-success cursor-default"
-                    : "bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-primary/40"
+                    ? s.internal
+                      ? "bg-primary/10 border-primary/40 text-primary cursor-default"
+                      : "bg-success/10 border-success/30 text-success cursor-default"
+                    : s.internal
+                      ? "bg-primary/5 border-primary/30 text-primary hover:bg-primary/15"
+                      : "bg-secondary border-border text-muted-foreground hover:text-foreground hover:border-primary/40"
                 }`}
               >
                 {exists ? "✓ " : "+ "}
@@ -327,12 +330,12 @@ export function RemoteBlocklists() {
   );
 }
 
-// Convierte la URL interna (http://netadmin-nginx/blocklists/...) en la URL pública navegable
+// Convierte la URL interna (http://netadmin-nginx/... o http://172.20.0.19/...) en la URL pública navegable
 // que el operador puede compartir / verificar desde fuera del docker network.
 function toPublicUrl(internalUrl: string): string {
   try {
     const u = new URL(internalUrl);
-    if (u.hostname === "netadmin-nginx") {
+    if (u.hostname === "netadmin-nginx" || u.hostname === "172.20.0.19") {
       return `${window.location.protocol}//${window.location.host}${u.pathname}`;
     }
     return internalUrl;
