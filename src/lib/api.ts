@@ -102,9 +102,13 @@ export const api = {
   getAdGuardQueryLog: () => apiFetch('/adguard/querylog'),
   getAdGuardFiltering: () => apiFetch('/adguard/filtering'),
   addFilter: (url: string, name: string) =>
-    apiFetch('/adguard/filtering/add', { method: 'POST', body: JSON.stringify({ url, name }) }),
+    apiFetch('/adguard/filtering/add', { method: 'POST', body: JSON.stringify({ url, name, whitelist: false }) }),
   removeFilter: (url: string) =>
-    apiFetch('/adguard/filtering/remove', { method: 'POST', body: JSON.stringify({ url }) }),
+    apiFetch('/adguard/filtering/remove', { method: 'POST', body: JSON.stringify({ url, whitelist: false }) }),
+  toggleFilter: (url: string, enabled: boolean, name?: string) =>
+    apiFetch('/adguard/filtering/set', { method: 'POST', body: JSON.stringify({ url, data: { enabled, url, name: name || url }, whitelist: false }) }),
+  refreshFilters: () =>
+    apiFetch('/adguard/filtering/refresh', { method: 'POST', body: JSON.stringify({ whitelist: false }), timeoutMs: 60000 }),
 
   // Local blocklist
   getBlocklist: () => apiFetch('/blocklist'),
@@ -115,6 +119,8 @@ export const api = {
     apiFetch('/blocklist/bulk-add', { method: 'POST', body: JSON.stringify({ domains, category }), timeoutMs: 120000 }),
   removeFromBlocklist: (domain: string) =>
     apiFetch('/blocklist/remove', { method: 'POST', body: JSON.stringify({ domain }) }),
+  bulkRemoveFromBlocklist: (domains: string[]) =>
+    apiFetch('/blocklist/bulk-remove', { method: 'POST', body: JSON.stringify({ domains }), timeoutMs: 60000 }),
   clearBlocklist: (category?: string) =>
     apiFetch('/blocklist/clear', { method: 'POST', body: JSON.stringify({ category }) }),
   diagnoseBlocklist: (testDomain?: string) =>

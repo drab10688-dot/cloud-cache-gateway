@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Shield, Plus, Trash2, Search, Baby, AlertTriangle, Globe, RefreshCw, Clock, CheckCircle, Loader2, Upload, FileText, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
+import { RemoteBlocklists } from "./RemoteBlocklists";
 
 type FilterCategory = "all" | "mintic" | "infantil" | "coljuegos" | "manual";
 
@@ -133,6 +135,10 @@ export function DnsBlocklist() {
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Bulk selection state
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // Debounce search input to avoid filtering huge lists on every keystroke
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250);
@@ -175,10 +181,14 @@ export function DnsBlocklist() {
     }
     try {
       await api.addToBlocklist(normalized, newCategory);
-      const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
-      setBlocklist([{ domain: normalized, reason: reasons[newCategory] || "Manual", category: newCategory, active: true }, ...blocklist.filter(item => item.domain !== normalized)]);
       setNewDomain("");
       toast({ title: "Dominio agregado", description: `${normalized} → AdGuard recargado` });
+      // Re-fetch desde el backend para que el dominio quede visible y persistente
+      await fetchData();
+      // Si el filtro actual oculta la nueva categoría, cambia a "all" para que el usuario lo vea
+      if (filterCat !== "all" && filterCat !== newCategory) {
+        setFilterCat("all");
+      }
     } catch (e: any) {
       toast({
         title: "No se pudo agregar el dominio",
@@ -192,12 +202,47 @@ export function DnsBlocklist() {
     try {
       await api.removeFromBlocklist(domain);
       setBlocklist(blocklist.filter(b => b.domain !== domain));
+      setSelected(prev => { const n = new Set(prev); n.delete(domain); return n; });
     } catch (e: any) {
       toast({
         title: "No se pudo eliminar",
         description: e?.message || "Error de conexión con el backend",
         variant: "destructive",
       });
+    }
+  };
+
+  const toggleSelect = (domain: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(domain)) next.delete(domain); else next.add(domain);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (visible: BlockedDomain[]) => {
+    const allSelected = visible.length > 0 && visible.every(v => selected.has(v.domain));
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allSelected) visible.forEach(v => next.delete(v.domain));
+      else visible.forEach(v => next.add(v.domain));
+      return next;
+    });
+  };
+
+  const bulkRemove = async () => {
+    if (selected.size === 0) return;
+    if (!confirm(`¿Eliminar ${selected.size} dominio(s) seleccionado(s)?`)) return;
+    setBulkDeleting(true);
+    try {
+      const res: any = await api.bulkRemoveFromBlocklist(Array.from(selected));
+      toast({ title: "Eliminados", description: `${res.removed || 0} dominios borrados de AdGuard` });
+      setSelected(new Set());
+      await fetchData();
+    } catch (e: any) {
+      toast({ title: "No se pudieron eliminar", description: e?.message || "Error", variant: "destructive" });
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -344,6 +389,9 @@ export function DnsBlocklist() {
         <h2 className="text-2xl font-bold text-foreground">DNS y Bloqueo de URLs</h2>
         <p className="text-sm text-muted-foreground mt-1">AdGuard + Unbound — Cumplimiento ISP Colombia (MinTIC / Coljuegos)</p>
       </div>
+
+      {/* NUEVO: Listas remotas (URLs) — gestión completa de filtros AdGuard */}
+      <RemoteBlocklists />
 
       {/* Upload MinTIC/Coljuegos lists */}
       <div className="card-glow rounded-lg p-5 mb-6 border-2 border-dashed border-warning/40">
@@ -571,19 +619,73 @@ export function DnsBlocklist() {
           </div>
         </div>
 
-        <div className="space-y-2 max-h-[400px] overflow-y-auto">
-          {visibleItems.map((item) => (
-            <div key={item.domain} className="flex items-center justify-between px-4 py-3 rounded-md border border-border bg-secondary/50">
-              <div className="flex items-center gap-3">
-                <Shield className="h-4 w-4 text-warning" />
-                <span className="text-sm font-mono text-foreground">{item.domain}</span>
-                <span className={`text-xs px-1.5 py-0.5 rounded ${catBadgeColors[item.category] || "bg-muted text-muted-foreground"}`}>{item.reason}</span>
-              </div>
-              <button onClick={() => removeDomain(item.domain)} className="text-muted-foreground hover:text-destructive transition-colors">
-                <Trash2 className="h-4 w-4" />
-              </button>
+        {/* Bulk action bar — visible cuando hay selección o hay items para seleccionar */}
+        {visibleItems.length > 0 && (
+          <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2 rounded-md bg-secondary/40 border border-border">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                checked={visibleItems.length > 0 && visibleItems.every(v => selected.has(v.domain))}
+                onCheckedChange={() => toggleSelectAll(visibleItems)}
+                aria-label="Seleccionar todos los visibles"
+              />
+              <span className="text-xs text-muted-foreground">
+                {selected.size > 0
+                  ? <><span className="text-foreground font-semibold">{selected.size}</span> seleccionado(s)</>
+                  : `Seleccionar los ${visibleItems.length} visibles`}
+              </span>
             </div>
-          ))}
+            <div className="flex items-center gap-2">
+              {selected.size > 0 && (
+                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} className="text-xs h-7">
+                  Limpiar
+                </Button>
+              )}
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={bulkRemove}
+                disabled={selected.size === 0 || bulkDeleting}
+                className="gap-1.5 h-7 text-xs"
+              >
+                {bulkDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                Eliminar seleccionados
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2 max-h-[400px] overflow-y-auto">
+          {visibleItems.map((item) => {
+            const isSelected = selected.has(item.domain);
+            return (
+              <div
+                key={item.domain}
+                className={`flex items-center justify-between px-4 py-3 rounded-md border transition-colors ${
+                  isSelected
+                    ? "border-primary/50 bg-primary/10"
+                    : "border-border bg-secondary/50"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <Checkbox
+                    checked={isSelected}
+                    onCheckedChange={() => toggleSelect(item.domain)}
+                    aria-label={`Seleccionar ${item.domain}`}
+                  />
+                  <Shield className="h-4 w-4 text-warning shrink-0" />
+                  <span className="text-sm font-mono text-foreground truncate">{item.domain}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${catBadgeColors[item.category] || "bg-muted text-muted-foreground"}`}>{item.reason}</span>
+                </div>
+                <button
+                  onClick={() => removeDomain(item.domain)}
+                  className="text-muted-foreground hover:text-destructive transition-colors shrink-0 ml-2"
+                  aria-label={`Eliminar ${item.domain}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            );
+          })}
           {filtered.length === 0 && <p className="text-center text-sm text-muted-foreground py-8">No hay dominios bloqueados. Agrega uno arriba.</p>}
           {visibleItems.length < filtered.length && (
             <div className="flex flex-col items-center gap-2 py-3 border-t border-border mt-2">
