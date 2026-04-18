@@ -220,7 +220,39 @@ export function DnsBlocklist() {
     }
   };
 
-  // File upload handler — usa bulk-add (1 refresh AdGuard total) en vez de N requests
+  // Diagnóstico: pregunta al backend por qué un dominio no se bloquea
+  const runDiagnose = async () => {
+    setDiagnosing(true);
+    setDiagnoseReport(null);
+    try {
+      const report: any = await api.diagnoseBlocklist();
+      setDiagnoseReport(report);
+      const issues = (report.issues || []) as string[];
+      const ok = issues.length === 1 && issues[0].startsWith("✅");
+      // Auto-reparar si AdGuard no tiene los filtros registrados
+      if (!ok && issues.some(i => i.includes("NO está registrado") || i.includes("DESACTIVADO"))) {
+        toast({ title: "Reparando...", description: "Re-registrando filtros en AdGuard" });
+        try {
+          await api.repairBlocklist();
+          const fixed: any = await api.diagnoseBlocklist();
+          setDiagnoseReport(fixed);
+          toast({ title: "✅ Reparado", description: "Filtros re-registrados. Refresca AdGuard para verlos." });
+        } catch (e: any) {
+          toast({ title: "No se pudo reparar", description: e?.message || "Error", variant: "destructive" });
+        }
+      } else if (ok) {
+        toast({ title: "✅ Bloqueo OK", description: "AdGuard está configurado correctamente" });
+      } else {
+        toast({ title: `⚠️ ${issues.length} problema(s)`, description: issues[0], variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "Diagnóstico falló", description: e?.message || "Backend no responde", variant: "destructive" });
+    } finally {
+      setDiagnosing(false);
+    }
+  };
+
+
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploading(true);
