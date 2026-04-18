@@ -231,6 +231,7 @@ export function DnsBlocklist() {
     let totalDuplicates = 0;
     let totalInvalid = 0;
     let totalParsed = 0;
+    let firstError: string | null = null;
     const existingDomains = new Set(blocklist.map(b => b.domain));
 
     for (const file of Array.from(files)) {
@@ -238,8 +239,6 @@ export function DnsBlocklist() {
         const content = await file.text();
         const domains = parseDomains(content);
         totalParsed += domains.length;
-
-        const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
 
         for (const domain of domains) {
           if (existingDomains.has(domain)) {
@@ -250,11 +249,13 @@ export function DnsBlocklist() {
             await api.addToBlocklist(toAdGuardRule(domain));
             existingDomains.add(domain);
             totalAdded++;
-          } catch {
+          } catch (e: any) {
+            if (!firstError) firstError = e?.message || "Error desconocido";
             totalInvalid++;
           }
         }
-      } catch {
+      } catch (e: any) {
+        if (!firstError) firstError = `Lectura del archivo: ${e?.message || "error"}`;
         totalInvalid += 1;
       }
     }
@@ -267,6 +268,22 @@ export function DnsBlocklist() {
       category: uploadCategory,
     });
     setUploading(false);
+
+    if (totalAdded === 0 && totalInvalid > 0) {
+      toast({
+        title: "No se agregó ningún dominio",
+        description: firstError
+          ? `Backend respondió: ${firstError}`
+          : "Verifica que el backend esté corriendo y autenticado.",
+        variant: "destructive",
+      });
+    } else if (totalAdded > 0) {
+      toast({
+        title: "Lista cargada",
+        description: `${totalAdded} dominios agregados, ${totalDuplicates} duplicados, ${totalInvalid} fallidos.`,
+      });
+    }
+
     fetchData(); // Refresh list
   };
 
