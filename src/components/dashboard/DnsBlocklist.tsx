@@ -6,6 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { RemoteBlocklists } from "./RemoteBlocklists";
+import { NetAdminDomainEditor } from "./NetAdminDomainEditor";
 
 type FilterCategory = "all" | "mintic" | "infantil" | "coljuegos" | "manual";
 
@@ -392,6 +393,9 @@ export function DnsBlocklist() {
 
       {/* NUEVO: Listas remotas (URLs) — gestión completa de filtros AdGuard */}
       <RemoteBlocklists />
+
+      {/* NUEVO: Editor unificado NetAdmin — agregar/subir/listar/eliminar por categoría */}
+      <NetAdminDomainEditor />
 
       {/* Upload MinTIC/Coljuegos lists */}
       <div className="card-glow rounded-lg p-5 mb-6 border-2 border-dashed border-warning/40">
