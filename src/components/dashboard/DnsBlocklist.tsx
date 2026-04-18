@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Shield, Plus, Trash2, Search, Baby, AlertTriangle, Globe, RefreshCw, Clock, CheckCircle, Loader2, Upload, FileText, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
+import { RemoteBlocklists } from "./RemoteBlocklists";
 
 type FilterCategory = "all" | "mintic" | "infantil" | "coljuegos" | "manual";
 
@@ -133,6 +135,10 @@ export function DnsBlocklist() {
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Bulk selection state
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // Debounce search input to avoid filtering huge lists on every keystroke
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250);
@@ -175,10 +181,14 @@ export function DnsBlocklist() {
     }
     try {
       await api.addToBlocklist(normalized, newCategory);
-      const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
-      setBlocklist([{ domain: normalized, reason: reasons[newCategory] || "Manual", category: newCategory, active: true }, ...blocklist.filter(item => item.domain !== normalized)]);
       setNewDomain("");
       toast({ title: "Dominio agregado", description: `${normalized} → AdGuard recargado` });
+      // Re-fetch desde el backend para que el dominio quede visible y persistente
+      await fetchData();
+      // Si el filtro actual oculta la nueva categoría, cambia a "all" para que el usuario lo vea
+      if (filterCat !== "all" && filterCat !== newCategory) {
+        setFilterCat("all");
+      }
     } catch (e: any) {
       toast({
         title: "No se pudo agregar el dominio",
@@ -192,12 +202,47 @@ export function DnsBlocklist() {
     try {
       await api.removeFromBlocklist(domain);
       setBlocklist(blocklist.filter(b => b.domain !== domain));
+      setSelected(prev => { const n = new Set(prev); n.delete(domain); return n; });
     } catch (e: any) {
       toast({
         title: "No se pudo eliminar",
         description: e?.message || "Error de conexión con el backend",
         variant: "destructive",
       });
+    }
+  };
+
+  const toggleSelect = (domain: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(domain)) next.delete(domain); else next.add(domain);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (visible: BlockedDomain[]) => {
+    const allSelected = visible.length > 0 && visible.every(v => selected.has(v.domain));
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (allSelected) visible.forEach(v => next.delete(v.domain));
+      else visible.forEach(v => next.add(v.domain));
+      return next;
+    });
+  };
+
+  const bulkRemove = async () => {
+    if (selected.size === 0) return;
+    if (!confirm(`¿Eliminar ${selected.size} dominio(s) seleccionado(s)?`)) return;
+    setBulkDeleting(true);
+    try {
+      const res: any = await api.bulkRemoveFromBlocklist(Array.from(selected));
+      toast({ title: "Eliminados", description: `${res.removed || 0} dominios borrados de AdGuard` });
+      setSelected(new Set());
+      await fetchData();
+    } catch (e: any) {
+      toast({ title: "No se pudieron eliminar", description: e?.message || "Error", variant: "destructive" });
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
