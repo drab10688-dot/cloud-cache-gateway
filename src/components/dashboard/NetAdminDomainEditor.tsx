@@ -66,15 +66,46 @@ export function NetAdminDomainEditor() {
   const fetchDomains = useCallback(async () => {
     try {
       const full: any = await api.getBlocklistFull();
-      const list: DomainItem[] = (full || []).map((it: any) => {
-        const cat = (["manual", "mintic", "coljuegos", "infantil"].includes(it.category) ? it.category : "manual") as Category;
-        return { domain: it.domain, category: cat };
-      });
+      console.log("[NetAdminEditor] getBlocklistFull response:", full);
+
+      // Soporte defensivo:
+      //  - formato nuevo: [{ domain, category }, ...]
+      //  - formato viejo: ["dom1", "dom2", ...]  (todo cae a "manual")
+      //  - error / no array: avisamos al usuario
+      if (!Array.isArray(full)) {
+        console.error("[NetAdminEditor] respuesta inesperada:", full);
+        toast({
+          title: "Backend desactualizado",
+          description: "El endpoint /api/blocklist/full no devolvió un array. Reinstala el backend con install-netadmin.sh.",
+          variant: "destructive",
+        });
+        setDomains([]);
+        setCounts({ manual: 0, mintic: 0, coljuegos: 0, infantil: 0 });
+        return;
+      }
+
+      const list: DomainItem[] = full
+        .map((it: any): DomainItem | null => {
+          if (typeof it === "string") {
+            return it ? { domain: it.toLowerCase(), category: "manual" } : null;
+          }
+          if (it && typeof it.domain === "string" && it.domain) {
+            const cat = (["manual", "mintic", "coljuegos", "infantil"].includes(it.category)
+              ? it.category
+              : "manual") as Category;
+            return { domain: it.domain.toLowerCase(), category: cat };
+          }
+          return null;
+        })
+        .filter((x): x is DomainItem => x !== null);
+
+      console.log(`[NetAdminEditor] ${list.length} dominios parseados de ${full.length} items`);
       setDomains(list);
       const c: Record<Category, number> = { manual: 0, mintic: 0, coljuegos: 0, infantil: 0 };
       for (const d of list) c[d.category]++;
       setCounts(c);
     } catch (e: any) {
+      console.error("[NetAdminEditor] fetchDomains error:", e);
       toast({ title: "No se pudieron cargar dominios", description: e?.message || "Backend offline", variant: "destructive" });
     } finally {
       setLoading(false);
@@ -91,11 +122,13 @@ export function NetAdminDomainEditor() {
     }
     setAdding(true);
     try {
-      await api.addToBlocklist(d, activeCat);
+      const resp: any = await api.addToBlocklist(d, activeCat);
+      console.log("[NetAdminEditor] addToBlocklist response:", resp);
       setNewDomain("");
-      toast({ title: "✓ Agregado", description: `${d} → ${activeCat}` });
+      toast({ title: "✓ Guardado en backend", description: `${d} → ${activeCat}. Recargando lista...` });
       await fetchDomains();
     } catch (e: any) {
+      console.error("[NetAdminEditor] addOne error:", e);
       toast({ title: "No se pudo agregar", description: e?.message || "Error", variant: "destructive" });
     } finally {
       setAdding(false);
