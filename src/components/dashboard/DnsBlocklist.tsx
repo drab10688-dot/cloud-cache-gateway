@@ -162,14 +162,24 @@ export function DnsBlocklist() {
 
   const addDomain = async () => {
     const normalized = normalizeDomainInput(newDomain);
-    if (!normalized) return;
+    if (!normalized) {
+      toast({ title: "Dominio inválido", description: "Escribe un dominio válido (ej: ejemplo.com)", variant: "destructive" });
+      return;
+    }
     try {
       // Send AdGuard rule format: ||domain^$important
       await api.addToBlocklist(toAdGuardRule(normalized));
       const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
       setBlocklist([{ domain: normalized, reason: reasons[newCategory] || "Manual", category: newCategory, active: true }, ...blocklist.filter(item => item.domain !== normalized)]);
       setNewDomain("");
-    } catch {}
+      toast({ title: "Dominio agregado", description: `${normalized} fue añadido al blocklist` });
+    } catch (e: any) {
+      toast({
+        title: "No se pudo agregar el dominio",
+        description: e?.message || "Error desconocido. Verifica que el backend esté corriendo y que estés autenticado.",
+        variant: "destructive",
+      });
+    }
   };
 
   const removeDomain = async (domain: string) => {
@@ -177,9 +187,18 @@ export function DnsBlocklist() {
       // Backend should accept either the bare domain or the rule; send rule for an exact match.
       await api.removeFromBlocklist(toAdGuardRule(domain));
       setBlocklist(blocklist.filter(b => b.domain !== domain));
-    } catch {
+    } catch (e1: any) {
       // Fallback: try removing by bare domain (for legacy entries)
-      try { await api.removeFromBlocklist(domain); setBlocklist(blocklist.filter(b => b.domain !== domain)); } catch {}
+      try {
+        await api.removeFromBlocklist(domain);
+        setBlocklist(blocklist.filter(b => b.domain !== domain));
+      } catch (e2: any) {
+        toast({
+          title: "No se pudo eliminar",
+          description: e2?.message || e1?.message || "Error de conexión con el backend",
+          variant: "destructive",
+        });
+      }
     }
   };
 
@@ -187,11 +206,19 @@ export function DnsBlocklist() {
     setUpdating(true);
     try {
       await api.triggerBlocklistUpdate();
+      toast({ title: "Actualización iniciada", description: "Descargando listas remotas..." });
       setTimeout(async () => {
         try { const s = await api.getBlocklistUpdateStatus(); setUpdateStatus(s); } catch {}
         setUpdating(false);
       }, 10000);
-    } catch { setUpdating(false); }
+    } catch (e: any) {
+      setUpdating(false);
+      toast({
+        title: "No se pudo iniciar la actualización",
+        description: e?.message || "Error de conexión",
+        variant: "destructive",
+      });
+    }
   };
 
   // File upload handler
