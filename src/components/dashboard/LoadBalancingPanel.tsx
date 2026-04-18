@@ -30,6 +30,7 @@ interface WanConfig {
   ip: string;        // e.g. 192.168.1.10
   cidr: number;      // e.g. 24
   gateway: string;   // e.g. 192.168.1.1
+  capacity: number;  // PCC weight (1 = base, 2 = 2x throughput share, etc.)
 }
 
 interface TrafficPoint {
@@ -337,50 +338,159 @@ function generateFirewallScript(wans: string[], lanSubnet: string): string {
 // ─── Script generators (balanceo) ───────────────────────
 
 function generatePCCScript(wans: string[], bridge: string, lans: string[], failover: boolean, wanConfigs: Record<string, WanConfig>): string {
+  // Capacidades proporcionales (Livaur-style): cada WAN aporta N pasos al PCC.
+  const capacities = wans.map(w => Math.max(1, wanConfigs[w]?.capacity ?? 1));
+  const totalSteps = capacities.reduce((a, b) => a + b, 0);
+  const stepMap: { wanIdx: number }[] = [];
+  capacities.forEach((cap, wanIdx) => {
+    for (let s = 0; s < cap; s++) stepMap.push({ wanIdx });
+  });
+
   const lines: string[] = [
-    `# === NetAdmin: Balanceo PCC con ${wans.length} WANs + ${failover ? "Failover" : "Sin Failover"} ===`,
+    `# === NetAdmin: Balanceo PCC AVANZADO (Livaur-style) — ${wans.length} WANs ===`,
+    `# Total pasos PCC: ${totalSteps} | Distribución: ${wans.map((w, i) => `${w}=${capacities[i]}`).join(", ")}`,
     `# Bridge LAN: ${bridge} (${lans.join(", ")})`,
+    `# Failover: ${failover ? "Dinámico (recalcula PCC al caer una WAN)" : "Desactivado"}`,
     "",
     generateWanSetupBlock(wans, wanConfigs),
     "# 1. Crear bridge LAN",
     `/interface bridge add name=${bridge} comment="NetAdmin: Bridge LAN balanceo"`,
     ...lans.map(l => `/interface bridge port add bridge=${bridge} interface=${l} comment="NetAdmin: LAN port"`),
     "",
-    "# 2. Crear routing-tables (RouterOS v7 — REQUERIDO antes de mark-routing)",
+    "# 2. Listas de interfaces (Livaur-style)",
+    `/interface list add name=LAN comment="NetAdmin PCC: Lista LAN"`,
+    `/interface list add name=WAN comment="NetAdmin PCC: Lista WAN"`,
+    `/interface list member add list=LAN interface=${bridge}`,
+    ...wans.map(w => `/interface list member add list=WAN interface=${w}`),
+    "",
+    "# 3. Routing-tables nombradas (RouterOS v7)",
     ...wans.map((_, i) => `/routing table add name=to_WAN${i + 1} fib disabled=no comment="NetAdmin PCC: Tabla WAN${i + 1}"`),
     "",
-    "# 3. Mangle: Marcar conexiones por PCC",
+    "# 4. Mangle: Aceptar tráfico hacia gateways de cada WAN (evita doble marcado)",
   ];
 
   wans.forEach((wan, i) => {
+    const cfg = wanConfigs[wan];
+    const gw = cfg?.mode === "static" && cfg.gateway ? cfg.gateway : `0.0.0.0`;
     lines.push(
-      `/ip firewall mangle add chain=prerouting in-interface=${bridge} dst-address-type=!local per-connection-classifier=both-addresses-and-ports:${wans.length}/${i} action=mark-connection new-connection-mark=WAN${i + 1}_conn passthrough=yes comment="NetAdmin PCC: Conexiones → ${wan}"`
+      `/ip firewall mangle add chain=prerouting in-interface-list=LAN dst-address=${gw} action=accept comment="NetAdmin PCC: fo_ip_gw${i + 1}"`,
     );
   });
 
-  lines.push("");
+  lines.push("", "# 5. Marcar conexiones entrantes por cada WAN (return-path)");
   wans.forEach((wan, i) => {
     lines.push(
-      `/ip firewall mangle add chain=prerouting connection-mark=WAN${i + 1}_conn action=mark-routing new-routing-mark=to_WAN${i + 1} passthrough=yes comment="NetAdmin PCC: Ruteo → ${wan}"`
+      `/ip firewall mangle add chain=prerouting in-interface=${wan} connection-mark=no-mark action=mark-connection new-connection-mark=WAN${i + 1}_conn passthrough=yes comment="NetAdmin PCC: In ${wan}"`,
     );
   });
 
-  lines.push("", "# 4. NAT por cada WAN");
-  wans.forEach((wan) => {
-    lines.push(`/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade comment="NetAdmin PCC: NAT ${wan}"`);
+  lines.push("", "# 6. Bandera PCC (pivote para el failover dinámico — no eliminar)");
+  lines.push(`/ip firewall mangle add chain=prerouting action=log log=no disabled=yes comment="fo_bandera_pcc"`);
+
+  lines.push("", `# 7. PCC: ${totalSteps} pasos repartidos por capacidad`);
+  stepMap.forEach((m, globalStep) => {
+    const wanIdx = m.wanIdx;
+    const wan = wans[wanIdx];
+    lines.push(
+      `/ip firewall mangle add chain=prerouting in-interface-list=LAN connection-mark=no-mark dst-address-type=!local per-connection-classifier=both-addresses:${totalSteps}/${globalStep} action=mark-connection new-connection-mark=WAN${wanIdx + 1}_conn passthrough=yes comment="NetAdmin PCC: paso ${globalStep + 1}/${totalSteps} → ${wan}"`,
+    );
   });
 
-  lines.push("", "# 5. Rutas por tabla (v7: routing-table=, NO routing-mark=)");
+  lines.push("", "# 8. Marcar ruteo desde LAN (prerouting)");
+  wans.forEach((wan, i) => {
+    lines.push(
+      `/ip firewall mangle add chain=prerouting in-interface-list=LAN connection-mark=WAN${i + 1}_conn action=mark-routing new-routing-mark=to_WAN${i + 1} passthrough=no comment="NetAdmin PCC: Ruteo LAN → ${wan}"`,
+    );
+  });
+
+  lines.push("", "# 9. Marcar ruteo del propio router (chain=output) — Livaur-style");
+  wans.forEach((wan, i) => {
+    lines.push(
+      `/ip firewall mangle add chain=output connection-mark=WAN${i + 1}_conn action=mark-routing new-routing-mark=to_WAN${i + 1} passthrough=no comment="NetAdmin PCC: Ruteo Router → ${wan}"`,
+    );
+  });
+
+  lines.push("", "# 10. NAT salida WAN");
+  lines.push(`/ip firewall nat add chain=srcnat out-interface-list=WAN action=masquerade comment="NetAdmin PCC: NAT salida WAN"`);
+
+  lines.push("", "# 11. Rutas por tabla (v7: routing-table=)");
   wans.forEach((wan, i) => {
     const cfg = wanConfigs[wan];
     const gw = cfg?.mode === "static" && cfg.gateway ? cfg.gateway : wan;
     lines.push(
-      `/ip route add dst-address=0.0.0.0/0 gateway=${gw} routing-table=to_WAN${i + 1} check-gateway=ping comment="NetAdmin PCC: Ruta ${wan}"`
+      `/ip route add dst-address=0.0.0.0/0 gateway=${gw} routing-table=to_WAN${i + 1} check-gateway=ping distance=1 comment="NetAdmin PCC: Ruta ${wan}"`,
     );
   });
 
-  if (failover) lines.push(generateFailoverBlock(wans, wanConfigs));
+  // 12. DHCP-client auto-update (Livaur-style) — solo para WANs DHCP
+  const dhcpWans = wans.map((w, i) => ({ w, i, cfg: wanConfigs[w] })).filter(x => x.cfg?.mode === "dhcp");
+  if (dhcpWans.length > 0) {
+    lines.push("", "# 12. DHCP-client con auto-actualización de gateway (Livaur-style)");
+    lines.push("# Cuando la WAN renueva IP, actualiza ruta y mangle automáticamente.");
+    dhcpWans.forEach(({ w, i }) => {
+      const idx = i + 1;
+      lines.push(
+        `/ip dhcp-client add interface=${w} add-default-route=no disabled=no comment="NetAdmin PCC: DHCP ${w}" script=":if (\\$bound = 1) do={ :local gw [/ip dhcp-client get [find interface=\\"${w}\\"] gateway]; /ip route set [find routing-table=\\"to_WAN${idx}\\"] gateway=\\"\\$gw\\"; /ip firewall mangle set [find comment=\\"NetAdmin PCC: fo_ip_gw${idx}\\"] dst-address=\\$gw }"`,
+      );
+    });
+  }
 
+  if (failover) {
+    lines.push(generateFailoverBlock(wans, wanConfigs));
+    lines.push(generateDynamicPccFailover(wans, capacities));
+  }
+
+  return lines.join("\n");
+}
+
+// Failover dinámico estilo Livaur: reescribe pasos PCC cuando una WAN cae.
+function generateDynamicPccFailover(wans: string[], capacities: number[]): string {
+  const lines: string[] = [
+    "",
+    "# ═══════════════════════════════════════════",
+    "# FAILOVER PCC DINÁMICO (Livaur-style)",
+    "# ═══════════════════════════════════════════",
+    "# Recalcula pasos PCC al caer/subir una WAN, manteniendo proporciones.",
+    "",
+    `:global naCapacities {${capacities.map((c, i) => `"${i + 1}"=${c}`).join(";")}};`,
+    "",
+    "/system script add name=netadminPccRecalc owner=admin policy=read,write,policy,test source={",
+    "  :global naCapacities;",
+    "  :local alive [:toarray \"\"];",
+    "  :local totalAlive 0;",
+    `  :for i from=1 to=${wans.length} do={`,
+    "    :local rid [/ip route find where routing-table=(\"to_WAN\".$i)];",
+    "    :if ([:len $rid] > 0) do={",
+    "      :local inact [/ip route get [:pick $rid 0] inactive];",
+    "      :if (!$inact) do={",
+    "        :set ($alive->[:tostr $i]) ($naCapacities->[:tostr $i]);",
+    "        :set totalAlive ($totalAlive + ($naCapacities->[:tostr $i]));",
+    "      }",
+    "    }",
+    "  }",
+    "  :if ($totalAlive = 0) do={ :log error \"NetAdmin PCC: ninguna WAN viva\"; :return 0; }",
+    "  :foreach r in=[/ip firewall mangle find where comment~\"NetAdmin PCC: paso\"] do={",
+    "    /ip firewall mangle remove $r;",
+    "  }",
+    "  :local step 0;",
+    "  :foreach idx,cap in=$alive do={",
+    "    :for s from=1 to=$cap do={",
+    "      /ip firewall mangle add chain=prerouting in-interface-list=LAN \\",
+    "        connection-mark=no-mark dst-address-type=!local \\",
+    "        per-connection-classifier=(\"both-addresses:\".$totalAlive.\"/\".$step) \\",
+    "        action=mark-connection new-connection-mark=(\"WAN\".$idx.\"_conn\") \\",
+    "        passthrough=yes \\",
+    "        comment=(\"NetAdmin PCC: paso \".($step+1).\"/\".$totalAlive.\" → WAN\".$idx);",
+    "      :set step ($step + 1);",
+    "    }",
+    "  }",
+    "  :log info (\"NetAdmin PCC recalculado: \".$totalAlive.\" pasos, \".[:len $alive].\" WANs vivas\");",
+    "}",
+    "",
+    "# Scheduler: ejecuta cada 30s",
+    "/system scheduler add name=netadminPccRecalcSched interval=30s on-event=\"/system script run netadminPccRecalc\" comment=\"NetAdmin PCC: Failover dinámico\"",
+    "",
+  ];
   return lines.join("\n");
 }
 
