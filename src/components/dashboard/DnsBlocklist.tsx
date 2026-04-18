@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { NetAdminDomainEditor } from "./NetAdminDomainEditor";
 import { AdGuardFiltersManager } from "./AdGuardFiltersManager";
+import { MintICReport } from "./MintICReport";
 
 type FilterCategory = "all" | "mintic" | "infantil" | "coljuegos" | "manual";
 
