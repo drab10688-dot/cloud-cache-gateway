@@ -379,7 +379,7 @@ function generatePCCScript(wans: string[], bridge: string, lans: string[], failo
     );
   });
 
-  if (failover) lines.push(generateFailoverBlock(wans));
+  if (failover) lines.push(generateFailoverBlock(wans, wanConfigs));
 
   return lines.join("\n");
 }
@@ -421,7 +421,7 @@ function generateNTHScript(wans: string[], bridge: string, lans: string[], failo
     );
   });
 
-  if (failover) lines.push(generateFailoverBlock(wans));
+  if (failover) lines.push(generateFailoverBlock(wans, wanConfigs));
 
   return lines.join("\n");
 }
@@ -538,7 +538,7 @@ function generateRoutingScript(
     );
   });
 
-  if (failover) lines.push(generateFailoverBlock(wans));
+  if (failover) lines.push(generateFailoverBlock(wans, wanConfigs));
 
   return lines.join("\n");
 }
