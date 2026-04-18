@@ -2902,8 +2902,10 @@ success "Node.js $(node -v) instalado"
 
 log "Clonando y compilando panel web..."
 REPO_DIR="/tmp/netadmin-panel-build"
+# Forzar cwd válido (el del shell padre puede estar roto si /opt/netadmin se borró antes)
+cd /tmp || cd /
 rm -rf ${REPO_DIR}
-git clone --depth 1 https://github.com/drab10688-dot/cloud-cache-gateway.git ${REPO_DIR}
+git -C /tmp clone --depth 1 https://github.com/drab10688-dot/cloud-cache-gateway.git netadmin-panel-build
 cd ${REPO_DIR}
 npm install --silent
 npm run build
