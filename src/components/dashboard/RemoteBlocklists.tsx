@@ -330,12 +330,12 @@ export function RemoteBlocklists() {
   );
 }
 
-// Convierte la URL interna (http://netadmin-nginx/blocklists/...) en la URL pública navegable
+// Convierte la URL interna (http://netadmin-nginx/... o http://172.20.0.19/...) en la URL pública navegable
 // que el operador puede compartir / verificar desde fuera del docker network.
 function toPublicUrl(internalUrl: string): string {
   try {
     const u = new URL(internalUrl);
-    if (u.hostname === "netadmin-nginx") {
+    if (u.hostname === "netadmin-nginx" || u.hostname === "172.20.0.19") {
       return `${window.location.protocol}//${window.location.host}${u.pathname}`;
     }
     return internalUrl;
