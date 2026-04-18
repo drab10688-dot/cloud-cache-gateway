@@ -50,7 +50,7 @@ const SUGGESTED_LISTS: { name: string; url: string; description: string }[] = [
 ];
 
 // Filtros internos NetAdmin (no editables desde aquí — se gestionan en sección de dominios)
-const NETADMIN_INTERNAL_PREFIX = "NetAdmin";
+const NETADMIN_INTERNAL_PREFIX = "NetAdmin"; // detecta "NetAdmin · ..." y "NetAdmin — ..." (compat)
 
 function formatDate(iso?: string): string {
   if (!iso) return "—";
