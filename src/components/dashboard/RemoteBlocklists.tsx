@@ -111,7 +111,7 @@ export function RemoteBlocklists() {
   useEffect(() => { fetchFilters(); }, [fetchFilters]);
 
   const addFromSuggested = async (s: SuggestedList) => {
-    if (filters.some(f => f.url === s.url || (s.internal && f.name === s.name))) {
+    if (!s.internal && filters.some(f => f.url === s.url)) {
       toast({ title: "Ya existe", description: `${s.name} ya está en la lista` });
       return;
     }
