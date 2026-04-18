@@ -2411,16 +2411,18 @@ http {
             try_files \$uri \$uri/ /index.html;
         }
 
-        # Blocklists servidas a AdGuard por HTTP interno (SIN auth, solo red Docker)
-        # AdGuard descarga estos archivos y los indexa en hash table → lookup O(1)
+        # Blocklists públicas — AdGuard las descarga como cualquier filter URL.
+        # Son listas de bloqueo (no datos sensibles), exponerlas públicamente es seguro
+        # y permite que aparezcan en la UI de AdGuard como "listas remotas" normales.
         location /blocklists/ {
             alias /var/blocklists/;
             default_type text/plain;
+            charset utf-8;
             add_header Cache-Control "no-cache, no-store, must-revalidate";
             add_header X-NetAdmin-Blocklist "1";
-            allow 172.20.0.0/24;
-            deny all;
-            autoindex off;
+            add_header Access-Control-Allow-Origin "*";
+            autoindex on;
+            autoindex_exact_size off;
         }
 
         # Speed test API (public, no auth, higher timeout + body size)
