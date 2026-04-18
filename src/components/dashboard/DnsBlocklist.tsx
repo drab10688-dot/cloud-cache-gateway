@@ -3,6 +3,7 @@ import { Shield, Plus, Trash2, Search, Baby, AlertTriangle, Globe, RefreshCw, Cl
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
 
 type FilterCategory = "all" | "mintic" | "infantil" | "coljuegos" | "manual";
 
