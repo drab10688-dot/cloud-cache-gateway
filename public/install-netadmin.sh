@@ -609,7 +609,8 @@ function normalizeDomain(input = '') {
   if (!value) return '';
 
   const sanitized = value
-    .replace(/^\|\|/, '')
+    .replace(/^\|\|/, '')             // quita prefijo AdGuard ||
+    .replace(/\^.*$/, '')             // quita sufijo AdGuard ^ (y cualquier modificador como ^$important)
     .replace(/^0\.0\.0\.0\s+/, '')
     .replace(/^127\.0\.0\.1\s+/, '')
     .replace(/^https?:\/\//, '')
