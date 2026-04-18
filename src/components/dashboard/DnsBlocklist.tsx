@@ -123,6 +123,8 @@ export function DnsBlocklist() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updating, setUpdating] = useState(false);
   const [visibleCount, setVisibleCount] = useState(200);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnoseReport, setDiagnoseReport] = useState<any>(null);
 
   // Upload state
   const [uploadCategory, setUploadCategory] = useState<FilterCategory>("mintic");
