@@ -470,14 +470,59 @@ export function DnsBlocklist() {
               </p>
             </div>
           </div>
-          <Button onClick={triggerUpdate} disabled={updating} variant="outline" className="gap-2">
-            {updating ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Actualizando...</>
-            ) : (
-              <><RefreshCw className="h-4 w-4" /> Actualizar ahora</>
-            )}
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={runDiagnose} disabled={diagnosing} variant="outline" className="gap-2">
+              {diagnosing ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Diagnosticando...</>
+              ) : (
+                <><Shield className="h-4 w-4" /> Diagnosticar</>
+              )}
+            </Button>
+            <Button onClick={triggerUpdate} disabled={updating} variant="outline" className="gap-2">
+              {updating ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Actualizando...</>
+              ) : (
+                <><RefreshCw className="h-4 w-4" /> Actualizar ahora</>
+              )}
+            </Button>
+          </div>
         </div>
+
+        {/* Reporte de diagnóstico */}
+        {diagnoseReport && (
+          <div className="mt-4 p-4 rounded-md bg-secondary/50 border border-border text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-foreground">Reporte de diagnóstico</span>
+              <button onClick={() => setDiagnoseReport(null)} className="text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>AdGuard accesible: <span className={diagnoseReport.adguard_reachable ? "text-success" : "text-destructive"}>{diagnoseReport.adguard_reachable ? "Sí" : "No"}</span></div>
+              <div>Protección activa: <span className={diagnoseReport.protection_enabled ? "text-success" : "text-destructive"}>{String(diagnoseReport.protection_enabled)}</span></div>
+              <div>Filtrado activo: <span className={diagnoseReport.filtering_enabled ? "text-success" : "text-destructive"}>{String(diagnoseReport.filtering_enabled)}</span></div>
+              <div>Filtros registrados: <span className="font-mono text-foreground">{diagnoseReport.registered_filters?.length || 0}</span></div>
+            </div>
+            {diagnoseReport.files_on_disk && (
+              <div className="space-y-1 pt-2 border-t border-border">
+                {Object.entries(diagnoseReport.files_on_disk).map(([cat, info]: [string, any]) => {
+                  const reg = diagnoseReport.registered_filters?.find((f: any) => f.url?.endsWith(`netadmin_${cat}.txt`));
+                  return (
+                    <div key={cat} className="flex justify-between font-mono">
+                      <span className="text-muted-foreground">{cat}:</span>
+                      <span className="text-foreground">
+                        disco: {info.domain_count} · adguard: {reg?.rules_count ?? "—"} {reg?.enabled === false && <span className="text-destructive">(off)</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="space-y-1 pt-2 border-t border-border">
+              {(diagnoseReport.issues || []).map((issue: string, i: number) => (
+                <p key={i} className={issue.startsWith("✅") ? "text-success" : "text-destructive"}>• {issue}</p>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
