@@ -390,6 +390,9 @@ export function DnsBlocklist() {
         <p className="text-sm text-muted-foreground mt-1">AdGuard + Unbound — Cumplimiento ISP Colombia (MinTIC / Coljuegos)</p>
       </div>
 
+      {/* NUEVO: Listas remotas (URLs) — gestión completa de filtros AdGuard */}
+      <RemoteBlocklists />
+
       {/* Upload MinTIC/Coljuegos lists */}
       <div className="card-glow rounded-lg p-5 mb-6 border-2 border-dashed border-warning/40">
         <div className="flex items-center gap-3 mb-4">
