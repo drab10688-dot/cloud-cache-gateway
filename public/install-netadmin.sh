@@ -631,11 +631,11 @@ const BLOCKLIST_NAMES = {
   coljuegos: 'NetAdmin — Coljuegos',
   infantil:  'NetAdmin — Protección infantil',
 };
-// AdGuard accede a estos archivos por su path DENTRO del contenedor adguard.
-// Path host: /opt/netadmin/data/adguard/conf/blocklists/...
-// Path en contenedor adguard: /opt/adguardhome/conf/blocklists/...
-const ADGUARD_FILE_PREFIX = '/opt/adguardhome/conf/blocklists';
-const adguardUrlFor = (cat) => `${ADGUARD_FILE_PREFIX}/netadmin_${cat}.txt`;
+// AdGuard descarga los archivos por HTTP desde el nginx interno.
+// nginx sirve /opt/netadmin/data/adguard/conf/blocklists/ en http://netadmin-nginx/blocklists/
+// Esto es lo único que AdGuard acepta como "filter URL" (no acepta paths locales).
+const BLOCKLIST_HTTP_BASE = 'http://netadmin-nginx/blocklists';
+const adguardUrlFor = (cat) => `${BLOCKLIST_HTTP_BASE}/netadmin_${cat}.txt`;
 
 function ensureBlocklistDir() {
   fs.mkdirSync(BLOCKLIST_DIR, { recursive: true });
@@ -717,7 +717,7 @@ async function postAdguard(path, body = {}) {
   return adguardRequest(path, 'POST', body);
 }
 
-// Garantiza: protección ON, filtrado ON, y cada filtro de categoría registrado.
+// Garantiza: protección ON, filtrado ON, filtros viejos eliminados, y cada categoría registrada con URL HTTP.
 async function ensureAdguardConfigured() {
   const status = await adguardRequest('/control/status');
   if (status && status.protection_enabled === false) {
@@ -727,11 +727,31 @@ async function ensureAdguardConfigured() {
   if (!filtering.enabled) {
     await postAdguard('/control/filtering/config', { enabled: true, interval: filtering.interval || 24 });
   }
-  const existingUrls = new Set((filtering.filters || []).map(f => f.url));
+
+  const expectedUrls = new Set(BLOCKLIST_CATEGORIES.map(adguardUrlFor));
+  const existingFilters = filtering.filters || [];
+
+  // 1. Eliminar filtros NetAdmin viejos con URL incorrecta (paths locales o stale)
+  for (const f of existingFilters) {
+    const isNetadmin = (f.name || '').toLowerCase().includes('netadmin');
+    const isLegacyPath = typeof f.url === 'string' && f.url.startsWith('/opt/');
+    const isStaleNetadmin = isNetadmin && !expectedUrls.has(f.url);
+    if (isLegacyPath || isStaleNetadmin) {
+      try {
+        await postAdguard('/control/filtering/remove_url', { url: f.url, whitelist: false });
+      } catch (e) { console.warn(`[blocklist] No se pudo borrar filtro viejo ${f.url}: ${e.message}`); }
+    }
+  }
+
+  // 2. Re-leer estado tras la limpieza
+  const filtering2 = await adguardRequest('/control/filtering/status');
+  const existingUrls2 = new Set((filtering2.filters || []).map(f => f.url));
+
+  // 3. Registrar cada categoría (asegurando que el archivo exista en disco para que nginx lo sirva)
   for (const cat of BLOCKLIST_CATEGORIES) {
     const url = adguardUrlFor(cat);
     if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
-    if (!existingUrls.has(url)) {
+    if (!existingUrls2.has(url)) {
       try {
         await postAdguard('/control/filtering/add_url', {
           name: BLOCKLIST_NAMES[cat],
@@ -739,7 +759,6 @@ async function ensureAdguardConfigured() {
           whitelist: false,
         });
       } catch (e) {
-        // Si ya existe con otro nombre o falla, no abortar — el resto debe funcionar
         console.warn(`[blocklist] No se pudo registrar ${cat}: ${e.message}`);
       }
     }
@@ -749,7 +768,7 @@ async function ensureAdguardConfigured() {
 async function reloadAdguardFilters() {
   // 1. Garantizar que los filtros estén registrados
   try { await ensureAdguardConfigured(); } catch (e) { console.warn(`[blocklist] ensureConfigured: ${e.message}`); }
-  // 2. Refrescar (AdGuard relee los archivos del disco)
+  // 2. Refrescar (AdGuard hace HTTP GET a nginx → relee los archivos al instante)
   try {
     await postAdguard('/control/filtering/refresh', { whitelist: false });
   } catch (e) {
@@ -1106,13 +1125,16 @@ app.get('/api/blocklist/diagnose', async (req, res) => {
   res.json(report);
 });
 
-// Fuerza re-registro y refresh — útil después de un reinstall
+// Fuerza re-registro y refresh — útil después de un reinstall o si algo se desincroniza
 app.post('/api/blocklist/repair', async (req, res) => {
   try {
     ensureBlocklistDir();
     for (const cat of BLOCKLIST_CATEGORIES) {
       if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
     }
+    // Limpiar user_rules viejas (reglas que el usuario pudo haber metido manualmente y no funcionaban)
+    try { await postAdguard('/control/filtering/set_rules', { rules: [] }); }
+    catch (e) { console.warn(`[repair] No se pudo limpiar user_rules: ${e.message}`); }
     await ensureAdguardConfigured();
     await postAdguard('/control/filtering/refresh', { whitelist: false });
     res.json({ success: true });
@@ -2271,6 +2293,24 @@ app.post('/api/telegram/alert', requireAuth, async (req, res) => {
 
 app.listen(API_PORT, '0.0.0.0', () => {
   console.log(`NetAdmin API v4.0 → http://0.0.0.0:${API_PORT}`);
+  // Auto-bootstrap blocklists: espera a AdGuard, limpia filtros viejos, registra los 4 NetAdmin
+  (async () => {
+    ensureBlocklistDir();
+    for (const cat of BLOCKLIST_CATEGORIES) {
+      if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
+    }
+    for (let i = 0; i < 30; i++) {
+      try {
+        await ensureAdguardConfigured();
+        await postAdguard('/control/filtering/refresh', { whitelist: false });
+        console.log('[blocklist] AdGuard configurado: 4 filtros NetAdmin registrados vía http://netadmin-nginx/blocklists/');
+        return;
+      } catch (e) {
+        if (i === 29) console.warn(`[blocklist] No se pudo auto-configurar AdGuard tras 30 intentos: ${e.message}`);
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+  })();
 });
 API_JS
 
@@ -2346,6 +2386,18 @@ http {
 
         location / {
             try_files \$uri \$uri/ /index.html;
+        }
+
+        # Blocklists servidas a AdGuard por HTTP interno (SIN auth, solo red Docker)
+        # AdGuard descarga estos archivos y los indexa en hash table → lookup O(1)
+        location /blocklists/ {
+            alias /var/blocklists/;
+            default_type text/plain;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+            add_header X-NetAdmin-Blocklist "1";
+            allow 172.20.0.0/24;
+            deny all;
+            autoindex off;
         }
 
         # Speed test API (public, no auth, higher timeout + body size)
@@ -2767,6 +2819,7 @@ services:
       - ./configs/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./web:/var/www/netadmin:ro
       - ./data/nginx-cache:/var/cache/nginx/cdn
+      - ./data/adguard/conf/blocklists:/var/blocklists:ro
     ports:
       - "${PANEL_PORT}:80"
       - "8888:8888"
