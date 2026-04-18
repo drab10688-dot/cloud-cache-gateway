@@ -268,16 +268,35 @@ function generateRoutingScript(
     "",
   ];
 
+  // RouterOS v7: crear las routing-tables ANTES de cualquier mark-routing / routing-table=
+  lines.push("# Crear routing-tables (RouterOS v7)");
+  wans.forEach((wan) => {
+    lines.push(
+      `/routing table add name=to_${wan} fib disabled=no \\`,
+      `  comment="NetAdmin Routing: Tabla ${wan}"`,
+    );
+  });
+  lines.push("");
+
   if (clientType === "pppoe") {
-    lines.push("# Crear perfiles PPPoE por WAN");
+    lines.push("# Crear pools PPPoE (primero los pools, luego los profiles)");
+    wans.forEach((wan, i) => {
+      const count = perWan + (i < remainder ? 1 : 0);
+      const lastOctet = Math.min(254, ((count + 1) % 254) || 254);
+      const thirdOctet = Math.max(0, Math.ceil((count + 1) / 254) - 1);
+      lines.push(
+        `/ip pool add name=pool-${wan} ranges=10.${i + 1}.0.2-10.${i + 1}.${thirdOctet}.${lastOctet} \\`,
+        `  comment="NetAdmin: Pool ${wan} (${count} clientes)"`,
+      );
+    });
+
+    lines.push("", "# Crear perfiles PPPoE por WAN");
     wans.forEach((wan, i) => {
       const count = perWan + (i < remainder ? 1 : 0);
       lines.push(
         `/ppp profile add name=plan-${wan} local-address=10.${i + 1}.0.1 \\`,
         `  remote-address=pool-${wan} dns-server=8.8.8.8 \\`,
         `  comment="NetAdmin Routing: ${count} clientes → ${wan}"`,
-        `/ip pool add name=pool-${wan} ranges=10.${i + 1}.0.2-10.${i + 1}.${Math.min(255, Math.ceil(count / 254))}.${Math.min(254, count)} \\`,
-        `  comment="NetAdmin: Pool ${wan}"`,
       );
     });
 
@@ -311,11 +330,13 @@ function generateRoutingScript(
     });
   }
 
-  lines.push("", "# NAT y Rutas por WAN");
+  lines.push("", "# NAT y Rutas por WAN (v7: usa routing-table=, no routing-mark=)");
   wans.forEach((wan) => {
     lines.push(
-      `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade`,
-      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-mark=to_${wan} check-gateway=ping`,
+      `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade \\`,
+      `  comment="NetAdmin Routing: NAT ${wan}"`,
+      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-table=to_${wan} check-gateway=ping \\`,
+      `  comment="NetAdmin Routing: Ruta ${wan}"`,
     );
   });
 
