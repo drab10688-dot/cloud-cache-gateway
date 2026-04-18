@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Globe, Plus, Trash2, RefreshCw, Loader2, ExternalLink, CheckCircle, XCircle } from "lucide-react";
+import { Globe, Plus, Trash2, RefreshCw, Loader2, ExternalLink, CheckCircle, XCircle, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -311,6 +311,20 @@ export function RemoteBlocklists() {
   );
 }
 
+// Convierte la URL interna (http://netadmin-nginx/blocklists/...) en la URL pública navegable
+// que el operador puede compartir / verificar desde fuera del docker network.
+function toPublicUrl(internalUrl: string): string {
+  try {
+    const u = new URL(internalUrl);
+    if (u.hostname === "netadmin-nginx") {
+      return `${window.location.protocol}//${window.location.host}${u.pathname}`;
+    }
+    return internalUrl;
+  } catch {
+    return internalUrl;
+  }
+}
+
 function FilterRow({
   filter,
   onToggle,
@@ -322,6 +336,20 @@ function FilterRow({
   onRemove: (f: RemoteFilter) => void;
   internal: boolean;
 }) {
+  const [copied, setCopied] = useState(false);
+  const publicUrl = internal ? toPublicUrl(filter.url) : filter.url;
+
+  const copyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      toast({ title: "URL copiada", description: publicUrl });
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast({ title: "No se pudo copiar", variant: "destructive" });
+    }
+  };
+
   return (
     <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-3 px-3 py-2.5 items-center text-sm border-b border-border last:border-b-0 hover:bg-secondary/40">
       <div className="w-10 flex justify-center">
@@ -329,15 +357,27 @@ function FilterRow({
       </div>
       <div className="min-w-0">
         <p className="text-foreground font-medium truncate">{filter.name}</p>
-        <a
-          href={filter.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs text-muted-foreground hover:text-primary inline-flex items-center gap-1 truncate max-w-full"
-        >
-          <ExternalLink className="h-3 w-3 shrink-0" />
-          <span className="truncate">{filter.url}</span>
-        </a>
+        <div className="flex items-center gap-1.5 max-w-full">
+          <a
+            href={publicUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-muted-foreground hover:text-primary inline-flex items-center gap-1 truncate min-w-0"
+            title={publicUrl}
+          >
+            <ExternalLink className="h-3 w-3 shrink-0" />
+            <span className="truncate font-mono">{publicUrl}</span>
+          </a>
+          {internal && (
+            <button
+              onClick={copyUrl}
+              title="Copiar URL pública"
+              className="shrink-0 p-1 rounded hover:bg-secondary text-muted-foreground hover:text-primary transition-colors"
+            >
+              {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
+            </button>
+          )}
+        </div>
       </div>
       <div className="text-right w-24 font-mono text-xs">
         {filter.rules_count ? (
