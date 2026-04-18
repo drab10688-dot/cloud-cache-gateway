@@ -110,15 +110,23 @@ export function RemoteBlocklists() {
 
   useEffect(() => { fetchFilters(); }, [fetchFilters]);
 
-  const addFromSuggested = async (s: { name: string; url: string }) => {
-    if (filters.some(f => f.url === s.url)) {
+  const addFromSuggested = async (s: SuggestedList) => {
+    if (filters.some(f => f.url === s.url || (s.internal && f.name === s.name))) {
       toast({ title: "Ya existe", description: `${s.name} ya está en la lista` });
       return;
     }
     setAdding(true);
     try {
-      await api.addFilter(s.url, s.name);
-      toast({ title: "Lista agregada", description: `${s.name} → AdGuard la descargará` });
+      if (s.internal) {
+        // Listas NetAdmin: backend las registra con la URL interna del docker network
+        // (AdGuard no puede resolver IP pública desde adentro del compose).
+        const res: any = await api.ensureBlocklistRegistered();
+        const ok = (res?.status || []).filter((c: any) => c.registered).length;
+        toast({ title: "Listas NetAdmin activas", description: `${ok}/4 categorías registradas en AdGuard` });
+      } else {
+        await api.addFilter(s.url, s.name);
+        toast({ title: "Lista agregada", description: `${s.name} → AdGuard la descargará` });
+      }
       await fetchFilters();
     } catch (e: any) {
       toast({ title: "No se pudo agregar", description: e?.message || "Error", variant: "destructive" });
