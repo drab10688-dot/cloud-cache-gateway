@@ -1427,11 +1427,27 @@ export function LoadBalancingPanel() {
               )}
 
               {execResult && (
-                <div className={`rounded-md p-3 border-l-4 ${execResult.success ? "border-l-success bg-success/10" : "border-l-destructive bg-destructive/10"}`}>
+                <div className={`rounded-md p-3 border-l-4 space-y-2 ${execResult.success ? "border-l-success bg-success/10" : "border-l-destructive bg-destructive/10"}`}>
                   <div className="flex items-center gap-2">
                     {execResult.success ? <CheckCircle className="h-4 w-4 text-success" /> : <XCircle className="h-4 w-4 text-destructive" />}
-                    <span className="text-sm text-foreground">{execResult.message}</span>
+                    <span className="text-sm text-foreground font-medium">{execResult.message}</span>
                   </div>
+                  {execResult.failures && execResult.failures.length > 0 && (
+                    <div className="mt-2 space-y-1.5 max-h-64 overflow-y-auto">
+                      <p className="text-xs font-semibold text-destructive">Detalle de errores:</p>
+                      {execResult.failures.map((f, idx) => (
+                        <div key={idx} className="bg-background/60 border border-destructive/30 rounded p-2 text-xs font-mono">
+                          <p className="text-foreground break-all"><span className="text-destructive">✗</span> {f.cmd}</p>
+                          <p className="text-destructive/90 mt-1 pl-3">↳ {f.error}</p>
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-muted-foreground italic mt-2">
+                        💡 Errores comunes: <code className="bg-muted px-1 rounded">already added as bridge port</code> (interfaz ya en otro bridge),
+                        <code className="bg-muted px-1 rounded ml-1">already have such entry</code> (regla duplicada — ignorable),
+                        <code className="bg-muted px-1 rounded ml-1">no such item</code> (orden de creación incorrecto).
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
