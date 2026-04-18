@@ -615,100 +615,145 @@ function normalizeDomain(input = '') {
     : '';
 }
 
-const BLOCKLIST_FILE = '/data/adguard/conf/blocklists/colombia_mintic.txt';
+// === BLOCKLIST: 1 archivo por categoría, registrados como filter URLs en AdGuard ===
+// AdGuard carga estos archivos en hash table al refresh → lookup O(1), soporta millones.
+const BLOCKLIST_DIR = '/data/adguard/conf/blocklists';
+const BLOCKLIST_CATEGORIES = ['manual', 'mintic', 'coljuegos', 'infantil'];
+const BLOCKLIST_FILES = {
+  manual:    `${BLOCKLIST_DIR}/netadmin_manual.txt`,
+  mintic:    `${BLOCKLIST_DIR}/netadmin_mintic.txt`,
+  coljuegos: `${BLOCKLIST_DIR}/netadmin_coljuegos.txt`,
+  infantil:  `${BLOCKLIST_DIR}/netadmin_infantil.txt`,
+};
+const BLOCKLIST_NAMES = {
+  manual:    'NetAdmin — Manual',
+  mintic:    'NetAdmin — MinTIC',
+  coljuegos: 'NetAdmin — Coljuegos',
+  infantil:  'NetAdmin — Protección infantil',
+};
+// AdGuard accede a estos archivos por su path DENTRO del contenedor adguard.
+// Path host: /opt/netadmin/data/adguard/conf/blocklists/...
+// Path en contenedor adguard: /opt/adguardhome/conf/blocklists/...
+const ADGUARD_FILE_PREFIX = '/opt/adguardhome/conf/blocklists';
+const adguardUrlFor = (cat) => `${ADGUARD_FILE_PREFIX}/netadmin_${cat}.txt`;
 
-function readBlocklistDomains() {
+function ensureBlocklistDir() {
+  fs.mkdirSync(BLOCKLIST_DIR, { recursive: true });
+}
+
+function readCategory(category) {
   try {
-    const content = fs.readFileSync(BLOCKLIST_FILE, 'utf8');
-    return [...new Set(content.split('\n').map(line => normalizeDomain(line)).filter(Boolean))];
+    const content = fs.readFileSync(BLOCKLIST_FILES[category], 'utf8');
+    return [...new Set(
+      content.split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('!') && !line.startsWith('#'))
+        .map(line => normalizeDomain(line))
+        .filter(Boolean)
+    )];
   } catch {
     return [];
   }
 }
 
-function writeBlocklistDomains(domains) {
-  const unique = [...new Set(domains.map(domain => normalizeDomain(domain)).filter(Boolean))].sort();
+function writeCategory(category, domains) {
+  const file = BLOCKLIST_FILES[category];
+  if (!file) throw new Error(`Categoría inválida: ${category}`);
+  ensureBlocklistDir();
+  const unique = [...new Set(domains.map(d => normalizeDomain(d)).filter(Boolean))].sort();
+  // Formato Adblock estándar: AdGuard lo indexa en hash table (O(1) lookup)
   const body = [
-    '# NetAdmin — Lista local de dominios bloqueados',
-    '# Se mantiene desde el panel y se fusiona con actualizaciones automáticas',
-    ...unique,
+    `! Title: ${BLOCKLIST_NAMES[category]}`,
+    `! Description: NetAdmin blocklist (${category}) — gestionado desde el panel`,
+    `! Total: ${unique.length}`,
+    `! Updated: ${new Date().toISOString()}`,
+    ...unique.map(d => `||${d}^`),
   ].join('\n');
-
-  fs.mkdirSync('/data/adguard/conf/blocklists', { recursive: true });
-  fs.writeFileSync(BLOCKLIST_FILE, `${body}\n`);
-
+  fs.writeFileSync(file, `${body}\n`);
   return unique;
 }
 
-function readNetworkBytes() {
-  const text = fs.readFileSync('/host-proc/net/dev', 'utf8');
-  const lines = text.trim().split('\n').slice(2);
-  let rx = 0;
-  let tx = 0;
-
-  for (const line of lines) {
-    const [ifaceRaw, statsRaw = ''] = line.split(':');
-    const iface = ifaceRaw.trim();
-    if (!iface || iface === 'lo' || iface.startsWith('docker') || iface.startsWith('veth') || iface.startsWith('br-')) continue;
-    const cols = statsRaw.trim().split(/\s+/);
-    rx += Number(cols[0] || 0);
-    tx += Number(cols[8] || 0);
+function readAllDomains() {
+  const all = [];
+  for (const cat of BLOCKLIST_CATEGORIES) {
+    for (const d of readCategory(cat)) all.push({ domain: d, category: cat });
   }
-
-  return { rx, tx };
+  return all;
 }
 
-let previousNetSample = null;
+let adguardCookie = null;
+let adguardCookieAt = 0;
 
 async function adguardLogin() {
+  // Reusar cookie 5 minutos para evitar login en cada request
+  if (adguardCookie && (Date.now() - adguardCookieAt) < 5 * 60 * 1000) return adguardCookie;
   const response = await fetch(`${ADGUARD_URL}/control/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: 'admin', password: PANEL_PASS }),
   });
-
-  if (!response.ok) {
-    throw new Error(`Login AdGuard falló (${response.status})`);
-  }
-
+  if (!response.ok) throw new Error(`Login AdGuard falló (${response.status})`);
   const cookie = (response.headers.get('set-cookie') || '').split(';')[0].trim();
-  if (!cookie) {
-    throw new Error('AdGuard no devolvió cookie de sesión');
-  }
-
+  if (!cookie) throw new Error('AdGuard no devolvió cookie de sesión');
+  adguardCookie = cookie;
+  adguardCookieAt = Date.now();
   return cookie;
 }
 
-async function postAdguard(path, body = {}) {
+async function adguardRequest(path, method = 'GET', body) {
   const cookie = await adguardLogin();
-  const response = await fetch(`${ADGUARD_URL}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: cookie,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const message = await response.text().catch(() => '');
-    throw new Error(`AdGuard respondió ${response.status}${message ? `: ${message.slice(0, 200)}` : ''}`);
+  const opts = { method, headers: { 'Content-Type': 'application/json', Cookie: cookie } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(`${ADGUARD_URL}${path}`, opts);
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`AdGuard ${path} → ${r.status}${txt ? ': ' + txt.slice(0, 200) : ''}`);
   }
+  const ct = r.headers.get('content-type') || '';
+  return ct.includes('application/json') ? r.json() : { success: true };
+}
 
-  const contentType = response.headers.get('content-type') || '';
-  return contentType.includes('application/json') ? await response.json() : { success: true };
+async function postAdguard(path, body = {}) {
+  return adguardRequest(path, 'POST', body);
+}
+
+// Garantiza: protección ON, filtrado ON, y cada filtro de categoría registrado.
+async function ensureAdguardConfigured() {
+  const status = await adguardRequest('/control/status');
+  if (status && status.protection_enabled === false) {
+    await postAdguard('/control/protection', { enabled: true, duration: 0 });
+  }
+  const filtering = await adguardRequest('/control/filtering/status');
+  if (!filtering.enabled) {
+    await postAdguard('/control/filtering/config', { enabled: true, interval: filtering.interval || 24 });
+  }
+  const existingUrls = new Set((filtering.filters || []).map(f => f.url));
+  for (const cat of BLOCKLIST_CATEGORIES) {
+    const url = adguardUrlFor(cat);
+    if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
+    if (!existingUrls.has(url)) {
+      try {
+        await postAdguard('/control/filtering/add_url', {
+          name: BLOCKLIST_NAMES[cat],
+          url,
+          whitelist: false,
+        });
+      } catch (e) {
+        // Si ya existe con otro nombre o falla, no abortar — el resto debe funcionar
+        console.warn(`[blocklist] No se pudo registrar ${cat}: ${e.message}`);
+      }
+    }
+  }
 }
 
 async function reloadAdguardFilters() {
+  // 1. Garantizar que los filtros estén registrados
+  try { await ensureAdguardConfigured(); } catch (e) { console.warn(`[blocklist] ensureConfigured: ${e.message}`); }
+  // 2. Refrescar (AdGuard relee los archivos del disco)
   try {
-    await postAdguard('/control/filtering/refresh', {});
-  } catch {
-    try {
-      const rules = readBlocklistDomains().map(domain => `||${domain}^`).join('\n');
-      await postAdguard('/control/filtering/set_rules', { rules });
-    } catch {
-      // Ignore older/newer AdGuard variants if refresh endpoint differs.
-    }
+    await postAdguard('/control/filtering/refresh', { whitelist: false });
+  } catch (e) {
+    console.warn(`[blocklist] refresh: ${e.message}`);
   }
 }
 
