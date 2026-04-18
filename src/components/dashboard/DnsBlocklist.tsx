@@ -144,14 +144,19 @@ export function DnsBlocklist() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [domains, stats, updStatus] = await Promise.all([
-        api.getBlocklist(),
+      const [full, stats, updStatus] = await Promise.all([
+        api.getBlocklistFull().catch(async () => {
+          const list = await api.getBlocklist();
+          return (list as string[]).map(d => ({ domain: ruleToDomain(d), category: "manual" }));
+        }),
         api.getAdGuardStats().catch(() => null),
         api.getBlocklistUpdateStatus().catch(() => null),
       ]);
-      const mapped: BlockedDomain[] = (domains as string[]).map((raw: string) => ({
-        domain: ruleToDomain(raw), reason: "Lista local", category: "manual" as FilterCategory, active: true,
-      }));
+      const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
+      const mapped: BlockedDomain[] = (full as Array<{ domain: string; category: string }>).map(item => {
+        const cat = (["manual", "mintic", "coljuegos", "infantil"].includes(item.category) ? item.category : "manual") as FilterCategory;
+        return { domain: item.domain, reason: reasons[cat] || "Manual", category: cat, active: true };
+      });
       setBlocklist(mapped);
       setAdguardStats(stats);
       if (updStatus) setUpdateStatus(updStatus);
@@ -167,16 +172,15 @@ export function DnsBlocklist() {
       return;
     }
     try {
-      // Send AdGuard rule format: ||domain^$important
-      await api.addToBlocklist(toAdGuardRule(normalized));
+      await api.addToBlocklist(normalized, newCategory);
       const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
       setBlocklist([{ domain: normalized, reason: reasons[newCategory] || "Manual", category: newCategory, active: true }, ...blocklist.filter(item => item.domain !== normalized)]);
       setNewDomain("");
-      toast({ title: "Dominio agregado", description: `${normalized} fue añadido al blocklist` });
+      toast({ title: "Dominio agregado", description: `${normalized} → AdGuard recargado` });
     } catch (e: any) {
       toast({
         title: "No se pudo agregar el dominio",
-        description: e?.message || "Error desconocido. Verifica que el backend esté corriendo y que estés autenticado.",
+        description: e?.message || "Verifica que el backend esté corriendo y autenticado.",
         variant: "destructive",
       });
     }
@@ -184,21 +188,14 @@ export function DnsBlocklist() {
 
   const removeDomain = async (domain: string) => {
     try {
-      // Backend should accept either the bare domain or the rule; send rule for an exact match.
-      await api.removeFromBlocklist(toAdGuardRule(domain));
+      await api.removeFromBlocklist(domain);
       setBlocklist(blocklist.filter(b => b.domain !== domain));
-    } catch (e1: any) {
-      // Fallback: try removing by bare domain (for legacy entries)
-      try {
-        await api.removeFromBlocklist(domain);
-        setBlocklist(blocklist.filter(b => b.domain !== domain));
-      } catch (e2: any) {
-        toast({
-          title: "No se pudo eliminar",
-          description: e2?.message || e1?.message || "Error de conexión con el backend",
-          variant: "destructive",
-        });
-      }
+    } catch (e: any) {
+      toast({
+        title: "No se pudo eliminar",
+        description: e?.message || "Error de conexión con el backend",
+        variant: "destructive",
+      });
     }
   };
 
@@ -221,42 +218,43 @@ export function DnsBlocklist() {
     }
   };
 
-  // File upload handler
+  // File upload handler — usa bulk-add (1 refresh AdGuard total) en vez de N requests
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploading(true);
     setUploadResult(null);
 
+    let totalParsed = 0;
     let totalAdded = 0;
     let totalDuplicates = 0;
     let totalInvalid = 0;
-    let totalParsed = 0;
     let firstError: string | null = null;
-    const existingDomains = new Set(blocklist.map(b => b.domain));
+    const allDomains: string[] = [];
 
     for (const file of Array.from(files)) {
       try {
         const content = await file.text();
         const domains = parseDomains(content);
         totalParsed += domains.length;
-
-        for (const domain of domains) {
-          if (existingDomains.has(domain)) {
-            totalDuplicates++;
-            continue;
-          }
-          try {
-            await api.addToBlocklist(toAdGuardRule(domain));
-            existingDomains.add(domain);
-            totalAdded++;
-          } catch (e: any) {
-            if (!firstError) firstError = e?.message || "Error desconocido";
-            totalInvalid++;
-          }
-        }
+        allDomains.push(...domains);
       } catch (e: any) {
         if (!firstError) firstError = `Lectura del archivo: ${e?.message || "error"}`;
         totalInvalid += 1;
+      }
+    }
+
+    if (allDomains.length > 0) {
+      const CHUNK = 5000;
+      try {
+        for (let i = 0; i < allDomains.length; i += CHUNK) {
+          const chunk = allDomains.slice(i, i + CHUNK);
+          const result: any = await api.bulkAddToBlocklist(chunk, uploadCategory);
+          totalAdded += result.added || 0;
+          totalDuplicates += result.duplicates || 0;
+          totalInvalid += result.invalid || 0;
+        }
+      } catch (e: any) {
+        if (!firstError) firstError = e?.message || "Error en bulk-add";
       }
     }
 
@@ -269,22 +267,20 @@ export function DnsBlocklist() {
     });
     setUploading(false);
 
-    if (totalAdded === 0 && totalInvalid > 0) {
+    if (totalAdded === 0 && (totalInvalid > 0 || firstError)) {
       toast({
         title: "No se agregó ningún dominio",
-        description: firstError
-          ? `Backend respondió: ${firstError}`
-          : "Verifica que el backend esté corriendo y autenticado.",
+        description: firstError ? `Backend: ${firstError}` : "Verifica el backend.",
         variant: "destructive",
       });
     } else if (totalAdded > 0) {
       toast({
-        title: "Lista cargada",
-        description: `${totalAdded} dominios agregados, ${totalDuplicates} duplicados, ${totalInvalid} fallidos.`,
+        title: "Lista cargada en AdGuard",
+        description: `${totalAdded} agregados, ${totalDuplicates} duplicados, ${totalInvalid} inválidos. AdGuard recargado.`,
       });
     }
 
-    fetchData(); // Refresh list
+    fetchData();
   };
 
   const handleDrop = (e: React.DragEvent) => {
