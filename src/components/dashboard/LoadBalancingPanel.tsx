@@ -83,23 +83,13 @@ function generateFailoverBlock(wans: string[]): string {
 
   wans.forEach((wan, i) => {
     const pingIp = pingTargets[i % pingTargets.length];
-    // Add a static route for the ping target via this WAN so it always goes out the right interface
+    // Up/down scripts compactados en una sola línea para evitar problemas con el parser line-by-line.
+    const upScript = `:log warning \\"NetAdmin: ${wan} UP - restaurando rutas\\"; /ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no; /ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no`;
+    const downScript = `:log error \\"NetAdmin: ${wan} DOWN - activando failover\\"; /ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes; /ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes`;
     lines.push(
       `# --- Failover: ${wan} (ping ${pingIp}) ---`,
       `/ip route add dst-address=${pingIp}/32 gateway=${wan} scope=10 comment="NetAdmin Failover: Ping target ${wan}"`,
-      "",
-      `/tool netwatch add host=${pingIp} interval=10s timeout=3s \\`,
-      `  up-script="\\`,
-      `/log warning \\"NetAdmin: ${wan} UP - restaurando rutas\\";\\`,
-      `/ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no;\\`,
-      `/ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no;\\`,
-      `" \\`,
-      `  down-script="\\`,
-      `/log error \\"NetAdmin: ${wan} DOWN - activando failover\\";\\`,
-      `/ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes;\\`,
-      `/ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes;\\`,
-      `" \\`,
-      `  comment="NetAdmin Failover: Monitor ${wan}"`,
+      `/tool netwatch add host=${pingIp} interval=10s timeout=3s up-script="${upScript}" down-script="${downScript}" comment="NetAdmin Failover: Monitor ${wan}"`,
       "",
     );
   });
@@ -107,9 +97,8 @@ function generateFailoverBlock(wans: string[]): string {
   lines.push(
     "# Ruta de respaldo global (último recurso)",
     ...wans.map((wan, i) =>
-      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} distance=${i + 10} check-gateway=ping \\`,
+      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} distance=${i + 10} check-gateway=ping comment="NetAdmin Failover: Backup ${wan}"`
     ),
-    `  comment="NetAdmin Failover: Ruta backup"`,
   );
 
   return lines.join("\n");
@@ -218,38 +207,33 @@ function generateNTHScript(wans: string[], bridge: string, lans: string[], failo
 }
 
 function generateBondingScript(wans: string[], bridge: string, lans: string[], failover: boolean): string {
+  const mode = failover ? "active-backup" : "balance-rr";
   const lines: string[] = [
-    `# === NetAdmin: Bonding con ${wans.length} interfaces + ${failover ? "Failover" : "Sin Failover"} ===`,
+    `# === NetAdmin: Bonding con ${wans.length} interfaces (${mode}) ===`,
+    `# IMPORTANTE (RouterOS v7): los slaves del bonding NO deben tener IP ni pertenecer a otro bridge.`,
+    `# Si fallan los siguientes comandos por "device already added", remueve manualmente:`,
+    `#   /interface bridge port remove [find interface=${wans[0]}]`,
     "",
-    `# Modo active-backup: si una interfaz cae, el bonding conmuta automáticamente`,
-    `/interface bonding add name=bond-wan mode=${failover ? "active-backup" : "balance-rr"} \\`,
-    `  slaves=${wans.join(",")} primary=${wans[0]} \\`,
-    `  comment="NetAdmin: Bonding WAN ${failover ? "(active-backup failover)" : "(round-robin)"}"`,
+    `# 1. Crear bonding sobre las WANs`,
+    `/interface bonding add name=bond-wan mode=${mode} slaves=${wans.join(",")} primary=${wans[0]} comment="NetAdmin: Bonding WAN (${mode})"`,
     "",
+    `# 2. Crear bridge LAN`,
     `/interface bridge add name=${bridge} comment="NetAdmin: Bridge LAN"`,
-    ...lans.map(l => `/interface bridge port add bridge=${bridge} interface=${l}`),
+    ...lans.map(l => `/interface bridge port add bridge=${bridge} interface=${l} comment="NetAdmin: LAN port"`),
     "",
-    `/ip firewall nat add chain=srcnat out-interface=bond-wan action=masquerade \\`,
-    `  comment="NetAdmin: NAT Bonding"`,
-    `/ip route add dst-address=0.0.0.0/0 gateway=bond-wan check-gateway=ping \\`,
-    `  comment="NetAdmin: Ruta Bonding"`,
+    `# 3. NAT y ruta default sobre el bonding`,
+    `/ip firewall nat add chain=srcnat out-interface=bond-wan action=masquerade comment="NetAdmin: NAT Bonding"`,
+    `/ip route add dst-address=0.0.0.0/0 gateway=bond-wan check-gateway=ping comment="NetAdmin: Ruta Bonding"`,
   ];
 
   if (failover) {
     lines.push(
       "",
       "# ═══ Failover Bonding ═══",
-      "# El modo active-backup ya incluye failover nativo.",
-      "# Adicionalmente, Netwatch monitorea conectividad externa:",
+      "# active-backup ya conmuta automáticamente al slave activo si el primary cae.",
+      "# Netwatch adicional para alertar pérdida total de conectividad:",
       "",
-      `/tool netwatch add host=8.8.8.8 interval=10s timeout=3s \\`,
-      `  down-script="\\`,
-      `/log error \\"NetAdmin: Bonding sin conectividad externa\\";\\`,
-      `" \\`,
-      `  up-script="\\`,
-      `/log warning \\"NetAdmin: Bonding conectividad restaurada\\";\\`,
-      `" \\`,
-      `  comment="NetAdmin Failover: Monitor Bonding"`,
+      `/tool netwatch add host=8.8.8.8 interval=10s timeout=3s up-script=":log warning \\"NetAdmin: Bonding conectividad restaurada\\"" down-script=":log error \\"NetAdmin: Bonding sin conectividad externa\\"" comment="NetAdmin Failover: Monitor Bonding"`,
     );
   }
 
@@ -979,7 +963,7 @@ export function LoadBalancingPanel() {
   // Script & execution
   const [generatedScript, setGeneratedScript] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
-  const [execResult, setExecResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [execResult, setExecResult] = useState<{ success: boolean; message: string; failures?: { cmd: string; error: string }[] } | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -1076,7 +1060,28 @@ export function LoadBalancingPanel() {
         }, []);
 
       const result = await mikrotikDeviceApi.execute(commands);
-      setExecResult({ success: result.success, message: result.message || "Script aplicado correctamente" });
+
+      // Extract per-command failures from results so the user sees which lines failed.
+      const failures: { cmd: string; error: string }[] = [];
+      if (Array.isArray(result.results)) {
+        result.results.forEach((entry: any) => {
+          if (entry && entry.success === false) {
+            failures.push({
+              cmd: String(entry.cmd || entry.command || "").slice(0, 200),
+              error: String(entry.error || entry.message || "Error desconocido"),
+            });
+          }
+        });
+      }
+
+      const ok = result.success && failures.length === 0;
+      setExecResult({
+        success: ok,
+        message: ok
+          ? (result.message || "Script aplicado correctamente")
+          : `${failures.length || 1} comando(s) fallaron de ${commands.length} ejecutados`,
+        failures: failures.length ? failures : undefined,
+      });
     } catch (e: any) {
       setExecResult({ success: false, message: e.message || "Error al ejecutar" });
     } finally {
@@ -1422,11 +1427,27 @@ export function LoadBalancingPanel() {
               )}
 
               {execResult && (
-                <div className={`rounded-md p-3 border-l-4 ${execResult.success ? "border-l-success bg-success/10" : "border-l-destructive bg-destructive/10"}`}>
+                <div className={`rounded-md p-3 border-l-4 space-y-2 ${execResult.success ? "border-l-success bg-success/10" : "border-l-destructive bg-destructive/10"}`}>
                   <div className="flex items-center gap-2">
                     {execResult.success ? <CheckCircle className="h-4 w-4 text-success" /> : <XCircle className="h-4 w-4 text-destructive" />}
-                    <span className="text-sm text-foreground">{execResult.message}</span>
+                    <span className="text-sm text-foreground font-medium">{execResult.message}</span>
                   </div>
+                  {execResult.failures && execResult.failures.length > 0 && (
+                    <div className="mt-2 space-y-1.5 max-h-64 overflow-y-auto">
+                      <p className="text-xs font-semibold text-destructive">Detalle de errores:</p>
+                      {execResult.failures.map((f, idx) => (
+                        <div key={idx} className="bg-background/60 border border-destructive/30 rounded p-2 text-xs font-mono">
+                          <p className="text-foreground break-all"><span className="text-destructive">✗</span> {f.cmd}</p>
+                          <p className="text-destructive/90 mt-1 pl-3">↳ {f.error}</p>
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-muted-foreground italic mt-2">
+                        💡 Errores comunes: <code className="bg-muted px-1 rounded">already added as bridge port</code> (interfaz ya en otro bridge),
+                        <code className="bg-muted px-1 rounded ml-1">already have such entry</code> (regla duplicada — ignorable),
+                        <code className="bg-muted px-1 rounded ml-1">no such item</code> (orden de creación incorrecto).
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
