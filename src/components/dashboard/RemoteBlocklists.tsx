@@ -64,6 +64,7 @@ export function RemoteBlocklists() {
   const [filters, setFilters] = useState<RemoteFilter[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
   const [adding, setAdding] = useState(false);
@@ -172,6 +173,24 @@ export function RemoteBlocklists() {
     }
   };
 
+  // Fuerza el registro de las 4 listas internas NetAdmin en AdGuard.
+  // Útil tras una reinstalación o si AdGuard fue reseteado y perdió la config.
+  const publishNetAdminLists = async () => {
+    setPublishing(true);
+    try {
+      await api.repairBlocklist();
+      toast({
+        title: "✅ Listas NetAdmin publicadas",
+        description: "Las 4 listas internas (Manual, MinTIC, Coljuegos, Infantil) están registradas y activas en AdGuard",
+      });
+      await fetchFilters();
+    } catch (e: any) {
+      toast({ title: "No se pudo publicar", description: e?.message || "Error", variant: "destructive" });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   // Separar internas vs externas para mostrar en orden
   const externalFilters = filters.filter(f => !f.name?.startsWith(NETADMIN_INTERNAL_PREFIX));
   const internalFilters = filters.filter(f => f.name?.startsWith(NETADMIN_INTERNAL_PREFIX));
@@ -192,10 +211,16 @@ export function RemoteBlocklists() {
             </p>
           </div>
         </div>
-        <Button onClick={refreshAll} disabled={refreshing} variant="outline" size="sm" className="gap-2">
-          {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Refrescar todas
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button onClick={publishNetAdminLists} disabled={publishing} variant="default" size="sm" className="gap-2">
+            {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+            Publicar listas NetAdmin
+          </Button>
+          <Button onClick={refreshAll} disabled={refreshing} variant="outline" size="sm" className="gap-2">
+            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Refrescar todas
+          </Button>
+        </div>
       </div>
 
       {/* Form: agregar URL personalizada */}
