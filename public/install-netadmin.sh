@@ -1125,13 +1125,16 @@ app.get('/api/blocklist/diagnose', async (req, res) => {
   res.json(report);
 });
 
-// Fuerza re-registro y refresh — útil después de un reinstall
+// Fuerza re-registro y refresh — útil después de un reinstall o si algo se desincroniza
 app.post('/api/blocklist/repair', async (req, res) => {
   try {
     ensureBlocklistDir();
     for (const cat of BLOCKLIST_CATEGORIES) {
       if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
     }
+    // Limpiar user_rules viejas (reglas que el usuario pudo haber metido manualmente y no funcionaban)
+    try { await postAdguard('/control/filtering/set_rules', { rules: [] }); }
+    catch (e) { console.warn(`[repair] No se pudo limpiar user_rules: ${e.message}`); }
     await ensureAdguardConfigured();
     await postAdguard('/control/filtering/refresh', { whitelist: false });
     res.json({ success: true });
@@ -2367,6 +2370,18 @@ http {
             try_files \$uri \$uri/ /index.html;
         }
 
+        # Blocklists servidas a AdGuard por HTTP interno (SIN auth, solo red Docker)
+        # AdGuard descarga estos archivos y los indexa en hash table → lookup O(1)
+        location /blocklists/ {
+            alias /var/blocklists/;
+            default_type text/plain;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+            add_header X-NetAdmin-Blocklist "1";
+            allow 172.20.0.0/24;
+            deny all;
+            autoindex off;
+        }
+
         # Speed test API (public, no auth, higher timeout + body size)
         location /api/speedtest/ {
             proxy_pass http://netadmin-api:4000;
@@ -2786,6 +2801,7 @@ services:
       - ./configs/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./web:/var/www/netadmin:ro
       - ./data/nginx-cache:/var/cache/nginx/cdn
+      - ./data/adguard/conf/blocklists:/var/blocklists:ro
     ports:
       - "${PANEL_PORT}:80"
       - "8888:8888"
