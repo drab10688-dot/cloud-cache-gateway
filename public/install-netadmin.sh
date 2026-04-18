@@ -26,6 +26,14 @@ error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 [ "$EUID" -ne 0 ] && error "Ejecuta como root: sudo bash install.sh"
 
+# ── Arreglar cwd roto (sucede tras una reinstalación previa que borró el dir actual)
+# Sin esto, comandos como `git clone` dentro de /tmp fallan con "getcwd() failed"
+if ! pwd >/dev/null 2>&1; then
+  cd /root 2>/dev/null || cd / 2>/dev/null || true
+  warn "Directorio de trabajo previo inválido — reposicionado a $(pwd)"
+fi
+cd /root 2>/dev/null || cd / 2>/dev/null || true
+
 # ── Mostrar versiones compatibles ──
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════╗${NC}"
