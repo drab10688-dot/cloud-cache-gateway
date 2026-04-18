@@ -619,19 +619,73 @@ export function DnsBlocklist() {
           </div>
         </div>
 
-        <div className="space-y-2 max-h-[400px] overflow-y-auto">
-          {visibleItems.map((item) => (
-            <div key={item.domain} className="flex items-center justify-between px-4 py-3 rounded-md border border-border bg-secondary/50">
-              <div className="flex items-center gap-3">
-                <Shield className="h-4 w-4 text-warning" />
-                <span className="text-sm font-mono text-foreground">{item.domain}</span>
-                <span className={`text-xs px-1.5 py-0.5 rounded ${catBadgeColors[item.category] || "bg-muted text-muted-foreground"}`}>{item.reason}</span>
-              </div>
-              <button onClick={() => removeDomain(item.domain)} className="text-muted-foreground hover:text-destructive transition-colors">
-                <Trash2 className="h-4 w-4" />
-              </button>
+        {/* Bulk action bar — visible cuando hay selección o hay items para seleccionar */}
+        {visibleItems.length > 0 && (
+          <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2 rounded-md bg-secondary/40 border border-border">
+            <div className="flex items-center gap-3">
+              <Checkbox
+                checked={visibleItems.length > 0 && visibleItems.every(v => selected.has(v.domain))}
+                onCheckedChange={() => toggleSelectAll(visibleItems)}
+                aria-label="Seleccionar todos los visibles"
+              />
+              <span className="text-xs text-muted-foreground">
+                {selected.size > 0
+                  ? <><span className="text-foreground font-semibold">{selected.size}</span> seleccionado(s)</>
+                  : `Seleccionar los ${visibleItems.length} visibles`}
+              </span>
             </div>
-          ))}
+            <div className="flex items-center gap-2">
+              {selected.size > 0 && (
+                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())} className="text-xs h-7">
+                  Limpiar
+                </Button>
+              )}
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={bulkRemove}
+                disabled={selected.size === 0 || bulkDeleting}
+                className="gap-1.5 h-7 text-xs"
+              >
+                {bulkDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                Eliminar seleccionados
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2 max-h-[400px] overflow-y-auto">
+          {visibleItems.map((item) => {
+            const isSelected = selected.has(item.domain);
+            return (
+              <div
+                key={item.domain}
+                className={`flex items-center justify-between px-4 py-3 rounded-md border transition-colors ${
+                  isSelected
+                    ? "border-primary/50 bg-primary/10"
+                    : "border-border bg-secondary/50"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <Checkbox
+                    checked={isSelected}
+                    onCheckedChange={() => toggleSelect(item.domain)}
+                    aria-label={`Seleccionar ${item.domain}`}
+                  />
+                  <Shield className="h-4 w-4 text-warning shrink-0" />
+                  <span className="text-sm font-mono text-foreground truncate">{item.domain}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${catBadgeColors[item.category] || "bg-muted text-muted-foreground"}`}>{item.reason}</span>
+                </div>
+                <button
+                  onClick={() => removeDomain(item.domain)}
+                  className="text-muted-foreground hover:text-destructive transition-colors shrink-0 ml-2"
+                  aria-label={`Eliminar ${item.domain}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            );
+          })}
           {filtered.length === 0 && <p className="text-center text-sm text-muted-foreground py-8">No hay dominios bloqueados. Agrega uno arriba.</p>}
           {visibleItems.length < filtered.length && (
             <div className="flex flex-col items-center gap-2 py-3 border-t border-border mt-2">
