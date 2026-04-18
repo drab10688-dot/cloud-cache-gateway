@@ -129,12 +129,7 @@ export function DnsBlocklist() {
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnoseReport, setDiagnoseReport] = useState<any>(null);
 
-  // Upload state
-  const [uploadCategory, setUploadCategory] = useState<FilterCategory>("mintic");
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
-  const [dragActive, setDragActive] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
 
   // Bulk selection state
   const [selected, setSelected] = useState<Set<string>>(new Set());
