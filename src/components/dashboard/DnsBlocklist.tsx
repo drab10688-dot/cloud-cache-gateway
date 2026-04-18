@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { NetAdminDomainEditor } from "./NetAdminDomainEditor";
 import { AdGuardFiltersManager } from "./AdGuardFiltersManager";
+import { MintICReport } from "./MintICReport";
 
 type FilterCategory = "all" | "mintic" | "infantil" | "coljuegos" | "manual";
 
@@ -322,6 +323,9 @@ export function DnsBlocklist() {
 
       {/* Gestor de listas remotas AdGuard — toggle on/off + agregar URLs públicas */}
       <AdGuardFiltersManager />
+
+      {/* Reporte de cumplimiento MinTIC — descarga CSV/PDF para auditorías */}
+      <MintICReport />
 
       {/* Auto-update status */}
       <div className="card-glow rounded-lg p-5 mb-6 border border-primary/20">
