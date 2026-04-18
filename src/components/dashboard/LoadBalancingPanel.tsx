@@ -1314,6 +1314,17 @@ export function LoadBalancingPanel() {
               </div>
             )}
 
+            <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 mb-4">
+              <p className="text-xs text-foreground leading-relaxed">
+                <strong>⚠️ Antes de aplicar el script (RouterOS v7):</strong> si las interfaces LAN
+                seleccionadas ya pertenecen a otro bridge, debes removerlas primero o el comando fallará con
+                <code className="px-1 mx-1 bg-muted rounded">device already added as bridge port</code>.
+                Ejecuta: <code className="px-1 mx-1 bg-muted rounded">/interface bridge port remove [find interface=ether4]</code>.
+                El script ya crea las <code className="px-1 mx-1 bg-muted rounded">/routing table</code> requeridas en v7
+                y usa <code className="px-1 mx-1 bg-muted rounded">routing-table=</code> en lugar del obsoleto <code className="px-1 mx-1 bg-muted rounded">routing-mark=</code>.
+              </p>
+            </div>
+
             {/* Routing-specific options */}
             {method === "routing" && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
