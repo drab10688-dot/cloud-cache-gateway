@@ -6,6 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { NetAdminDomainEditor } from "./NetAdminDomainEditor";
+import { AdGuardFiltersManager } from "./AdGuardFiltersManager";
 
 type FilterCategory = "all" | "mintic" | "infantil" | "coljuegos" | "manual";
 
@@ -393,103 +394,8 @@ export function DnsBlocklist() {
       {/* Editor unificado NetAdmin — agregar/subir/listar/eliminar por categoría */}
       <NetAdminDomainEditor />
 
-      {/* Upload MinTIC/Coljuegos lists */}
-      <div className="card-glow rounded-lg p-5 mb-6 border-2 border-dashed border-warning/40">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 rounded-md bg-warning/20">
-            <Upload className="h-5 w-5 text-warning" />
-          </div>
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Cargar Listas MinTIC / Coljuegos</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Sube los archivos TXT o CSV que entrega el MinTIC con los dominios a bloquear para cumplir la normativa ISP
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 mb-3">
-          <select
-            value={uploadCategory}
-            onChange={(e) => setUploadCategory(e.target.value as FilterCategory)}
-            className="bg-secondary border border-border rounded-md px-3 py-2 text-sm text-foreground"
-          >
-            <option value="mintic">📋 MinTIC — Resolución de bloqueo</option>
-            <option value="coljuegos">🎰 Coljuegos — Apuestas ilegales</option>
-            <option value="infantil">👶 Protección infantil</option>
-            <option value="manual">📝 Lista personalizada</option>
-          </select>
-        </div>
-
-        {/* Drop zone */}
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-          onDragLeave={() => setDragActive(false)}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
-            dragActive
-              ? "border-primary bg-primary/10"
-              : "border-border hover:border-primary/50 hover:bg-secondary/50"
-          }`}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".txt,.csv,.text,.lst,.hosts"
-            multiple
-            className="hidden"
-            onChange={(e) => handleFileUpload(e.target.files)}
-          />
-          {uploading ? (
-            <div className="flex flex-col items-center gap-2">
-              <Loader2 className="h-8 w-8 text-primary animate-spin" />
-              <p className="text-sm text-foreground font-medium">Procesando dominios...</p>
-              <p className="text-xs text-muted-foreground">Limpiando, deduplicando y aplicando a AdGuard</p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-2">
-              <FileText className="h-8 w-8 text-muted-foreground" />
-              <p className="text-sm text-foreground font-medium">
-                Arrastra archivos aquí o haz clic para seleccionar
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Soporta: TXT, CSV, formato hosts (0.0.0.0 dominio.com), un dominio por línea
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Upload result */}
-        {uploadResult && (
-          <div className="mt-4 p-4 rounded-md bg-secondary/50 border border-border animate-slide-in">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle className="h-4 w-4 text-success" />
-              <span className="text-sm font-semibold text-foreground">Lista procesada</span>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
-              <div className="text-center">
-                <p className="text-lg font-bold font-mono text-foreground">{uploadResult.total}</p>
-                <p className="text-xs text-muted-foreground">Dominios leídos</p>
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold font-mono text-success">{uploadResult.added}</p>
-                <p className="text-xs text-muted-foreground">Agregados</p>
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold font-mono text-warning">{uploadResult.duplicates}</p>
-                <p className="text-xs text-muted-foreground">Duplicados</p>
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold font-mono text-destructive">{uploadResult.invalid}</p>
-                <p className="text-xs text-muted-foreground">Inválidos</p>
-              </div>
-            </div>
-            <button onClick={() => setUploadResult(null)} className="mt-2 text-xs text-muted-foreground hover:text-foreground">
-              Cerrar
-            </button>
-          </div>
-        )}
-      </div>
+      {/* Gestor de listas remotas AdGuard — toggle on/off + agregar URLs públicas */}
+      <AdGuardFiltersManager />
 
       {/* Auto-update status */}
       <div className="card-glow rounded-lg p-5 mb-6 border border-primary/20">
