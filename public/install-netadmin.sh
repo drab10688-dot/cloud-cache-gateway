@@ -659,7 +659,8 @@ function readCategory(category) {
         .map(line => line.trim())
         .filter(line => line && !line.startsWith('!') && !line.startsWith('#'))
         .map(line => normalizeDomain(line))
-        .filter(Boolean)
+        // Filtra el dominio seed invisible (placeholder cuando la categoría está vacía)
+        .filter(d => d && !d.startsWith('netadmin-placeholder-'))
     )];
   } catch {
     return [];
@@ -671,15 +672,19 @@ function writeCategory(category, domains) {
   if (!file) throw new Error(`Categoría inválida: ${category}`);
   ensureBlocklistDir();
   const unique = [...new Set(domains.map(d => normalizeDomain(d)).filter(Boolean))].sort();
-  // Formato Adblock estándar: AdGuard lo indexa en hash table (O(1) lookup)
+  // Seed invisible: garantiza que AdGuard NUNCA rechace la lista por estar vacía (HTTP 400 "no rules").
+  // Es un dominio .invalid (RFC 6761) que jamás resolverá → no afecta a nadie.
+  const seed = `netadmin-placeholder-${category}.invalid`;
+  const rules = unique.length > 0 ? unique.map(d => `||${d}^`) : [`||${seed}^`];
   const body = [
     `! Title: ${BLOCKLIST_NAMES[category]}`,
     `! Description: NetAdmin blocklist (${category}) — gestionado desde el panel`,
     `! Total: ${unique.length}`,
     `! Updated: ${new Date().toISOString()}`,
-    ...unique.map(d => `||${d}^`),
+    ...rules,
   ].join('\n');
   fs.writeFileSync(file, `${body}\n`);
+  try { fs.chmodSync(file, 0o644); } catch { /* ignore */ }
   return unique;
 }
 
@@ -760,7 +765,8 @@ async function ensureAdguardConfigured() {
   // 3. Registrar cada categoría (asegurando que el archivo exista en disco para que nginx lo sirva)
   for (const cat of BLOCKLIST_CATEGORIES) {
     const url = adguardUrlFor(cat);
-    if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
+    // Re-escribe siempre: garantiza header válido + seed si está vacía (evita rechazo de AdGuard)
+    writeCategory(cat, readCategory(cat));
     if (!existingUrls2.has(url)) {
       try {
         await postAdguard('/control/filtering/add_url', {
@@ -768,9 +774,12 @@ async function ensureAdguardConfigured() {
           url,
           whitelist: false,
         });
+        console.log(`[blocklist] ✅ Registrado en AdGuard: ${cat} → ${url}`);
       } catch (e) {
-        console.warn(`[blocklist] No se pudo registrar ${cat}: ${e.message}`);
+        console.warn(`[blocklist] ❌ No se pudo registrar ${cat} (${url}): ${e.message}`);
       }
+    } else {
+      console.log(`[blocklist] ya existe en AdGuard: ${cat}`);
     }
   }
 }
