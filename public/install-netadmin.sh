@@ -631,11 +631,11 @@ const BLOCKLIST_NAMES = {
   coljuegos: 'NetAdmin — Coljuegos',
   infantil:  'NetAdmin — Protección infantil',
 };
-// AdGuard accede a estos archivos por su path DENTRO del contenedor adguard.
-// Path host: /opt/netadmin/data/adguard/conf/blocklists/...
-// Path en contenedor adguard: /opt/adguardhome/conf/blocklists/...
-const ADGUARD_FILE_PREFIX = '/opt/adguardhome/conf/blocklists';
-const adguardUrlFor = (cat) => `${ADGUARD_FILE_PREFIX}/netadmin_${cat}.txt`;
+// AdGuard descarga los archivos por HTTP desde el nginx interno.
+// nginx sirve /opt/netadmin/data/adguard/conf/blocklists/ en http://netadmin-nginx/blocklists/
+// Esto es lo único que AdGuard acepta como "filter URL" (no acepta paths locales).
+const BLOCKLIST_HTTP_BASE = 'http://netadmin-nginx/blocklists';
+const adguardUrlFor = (cat) => `${BLOCKLIST_HTTP_BASE}/netadmin_${cat}.txt`;
 
 function ensureBlocklistDir() {
   fs.mkdirSync(BLOCKLIST_DIR, { recursive: true });
