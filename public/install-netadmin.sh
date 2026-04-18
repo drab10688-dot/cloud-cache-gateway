@@ -717,7 +717,7 @@ async function postAdguard(path, body = {}) {
   return adguardRequest(path, 'POST', body);
 }
 
-// Garantiza: protección ON, filtrado ON, y cada filtro de categoría registrado.
+// Garantiza: protección ON, filtrado ON, filtros viejos eliminados, y cada categoría registrada con URL HTTP.
 async function ensureAdguardConfigured() {
   const status = await adguardRequest('/control/status');
   if (status && status.protection_enabled === false) {
@@ -727,11 +727,31 @@ async function ensureAdguardConfigured() {
   if (!filtering.enabled) {
     await postAdguard('/control/filtering/config', { enabled: true, interval: filtering.interval || 24 });
   }
-  const existingUrls = new Set((filtering.filters || []).map(f => f.url));
+
+  const expectedUrls = new Set(BLOCKLIST_CATEGORIES.map(adguardUrlFor));
+  const existingFilters = filtering.filters || [];
+
+  // 1. Eliminar filtros NetAdmin viejos con URL incorrecta (paths locales o stale)
+  for (const f of existingFilters) {
+    const isNetadmin = (f.name || '').toLowerCase().includes('netadmin');
+    const isLegacyPath = typeof f.url === 'string' && f.url.startsWith('/opt/');
+    const isStaleNetadmin = isNetadmin && !expectedUrls.has(f.url);
+    if (isLegacyPath || isStaleNetadmin) {
+      try {
+        await postAdguard('/control/filtering/remove_url', { url: f.url, whitelist: false });
+      } catch (e) { console.warn(`[blocklist] No se pudo borrar filtro viejo ${f.url}: ${e.message}`); }
+    }
+  }
+
+  // 2. Re-leer estado tras la limpieza
+  const filtering2 = await adguardRequest('/control/filtering/status');
+  const existingUrls2 = new Set((filtering2.filters || []).map(f => f.url));
+
+  // 3. Registrar cada categoría (asegurando que el archivo exista en disco para que nginx lo sirva)
   for (const cat of BLOCKLIST_CATEGORIES) {
     const url = adguardUrlFor(cat);
     if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
-    if (!existingUrls.has(url)) {
+    if (!existingUrls2.has(url)) {
       try {
         await postAdguard('/control/filtering/add_url', {
           name: BLOCKLIST_NAMES[cat],
@@ -739,7 +759,6 @@ async function ensureAdguardConfigured() {
           whitelist: false,
         });
       } catch (e) {
-        // Si ya existe con otro nombre o falla, no abortar — el resto debe funcionar
         console.warn(`[blocklist] No se pudo registrar ${cat}: ${e.message}`);
       }
     }
@@ -749,7 +768,7 @@ async function ensureAdguardConfigured() {
 async function reloadAdguardFilters() {
   // 1. Garantizar que los filtros estén registrados
   try { await ensureAdguardConfigured(); } catch (e) { console.warn(`[blocklist] ensureConfigured: ${e.message}`); }
-  // 2. Refrescar (AdGuard relee los archivos del disco)
+  // 2. Refrescar (AdGuard hace HTTP GET a nginx → relee los archivos al instante)
   try {
     await postAdguard('/control/filtering/refresh', { whitelist: false });
   } catch (e) {
