@@ -2397,7 +2397,7 @@ app.listen(API_PORT, '0.0.0.0', () => {
       try {
         await ensureAdguardConfigured();
         await postAdguard('/control/filtering/refresh', { whitelist: false });
-        console.log('[blocklist] AdGuard configurado: 4 filtros NetAdmin registrados vía http://netadmin-nginx/blocklists/');
+        console.log(`[blocklist] AdGuard configurado: 4 filtros NetAdmin registrados vía ${BLOCKLIST_HTTP_BASE}/`);
         return;
       } catch (e) {
         if (i === 29) console.warn(`[blocklist] No se pudo auto-configurar AdGuard tras 30 intentos: ${e.message}`);
