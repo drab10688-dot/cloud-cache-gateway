@@ -1438,6 +1438,24 @@ export function LoadBalancingPanel() {
                               ✓ DHCP automático — el router obtendrá IP, gateway y DNS de tu ISP.
                             </p>
                           )}
+                          {method === "pcc" && (
+                            <div className="mt-3 pt-3 border-t border-border flex items-center gap-3">
+                              <label className="text-xs text-muted-foreground whitespace-nowrap">
+                                Capacidad PCC:
+                              </label>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={20}
+                                value={cfg.capacity}
+                                onChange={e => updateWanConfig(wan, { capacity: Math.max(1, Math.min(20, parseInt(e.target.value) || 1)) })}
+                                className="font-mono text-sm h-8 w-20"
+                              />
+                              <span className="text-xs text-muted-foreground">
+                                Peso proporcional (1 = base, 2 = 2× tráfico, etc.)
+                              </span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
