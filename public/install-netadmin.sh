@@ -2980,9 +2980,16 @@ success "Panel web compilado y desplegado"
 # 11b. SAVE PASSWORD FILE
 # ============================================================
 log "Guardando contraseña del panel..."
-mkdir -p ${NETADMIN_DIR}/data
+# IMPORTANTE: el backend Node.js lee desde /data/tunnel/panel-pass.txt (dentro del contenedor),
+# que en el host es /opt/netadmin/data/tunnel/panel-pass.txt. Si guardamos en otra ruta,
+# el backend usa el default 'admin123' y la API devuelve 401 "No autorizado".
+mkdir -p ${NETADMIN_DIR}/data/tunnel
+echo "${PANEL_PASS}" > ${NETADMIN_DIR}/data/tunnel/panel-pass.txt
+chmod 600 ${NETADMIN_DIR}/data/tunnel/panel-pass.txt
+# Compat: dejar también una copia en la ruta vieja por si scripts legacy la usan
 echo "${PANEL_PASS}" > ${NETADMIN_DIR}/data/panel-pass.txt
-success "Contraseña guardada en ${NETADMIN_DIR}/data/panel-pass.txt"
+chmod 600 ${NETADMIN_DIR}/data/panel-pass.txt
+success "Contraseña guardada en ${NETADMIN_DIR}/data/tunnel/panel-pass.txt"
 
 # ============================================================
 # 12. LEVANTAR TODO
