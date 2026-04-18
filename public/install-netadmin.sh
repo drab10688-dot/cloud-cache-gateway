@@ -973,26 +973,148 @@ app.get('/api/adguard/filtering', proxyAdGuard('/control/filtering/status'));
 app.post('/api/adguard/filtering/add', proxyAdGuard('/control/filtering/add_url', 'POST'));
 app.post('/api/adguard/filtering/remove', proxyAdGuard('/control/filtering/remove_url', 'POST'));
 
+// Lista plana de dominios (compat hacia atrás con el frontend actual)
 app.get('/api/blocklist', (req, res) => {
-  res.json(readBlocklistDomains());
+  try {
+    const all = readAllDomains();
+    res.json(all.map(item => item.domain));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Lista detallada (dominio + categoría) para el panel
+app.get('/api/blocklist/full', (req, res) => {
+  try { res.json(readAllDomains()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/blocklist/add', async (req, res) => {
   try {
     const domain = normalizeDomain(req.body.domain);
     if (!domain) return res.status(400).json({ error: 'Dominio inválido' });
-    const domains = writeBlocklistDomains([...readBlocklistDomains(), domain]);
-    await reloadAdguardFilters();
-    res.json({ success: true, domain, total: domains.length });
+    const category = BLOCKLIST_CATEGORIES.includes(req.body.category) ? req.body.category : 'manual';
+    const current = readCategory(category);
+    if (!current.includes(domain)) {
+      writeCategory(category, [...current, domain]);
+      await reloadAdguardFilters();
+    }
+    res.json({ success: true, domain, category });
   }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Carga masiva: agrega N dominios a una categoría con UN solo refresh de AdGuard
+app.post('/api/blocklist/bulk-add', async (req, res) => {
+  try {
+    const category = BLOCKLIST_CATEGORIES.includes(req.body.category) ? req.body.category : 'manual';
+    const incoming = Array.isArray(req.body.domains) ? req.body.domains : [];
+    const normalized = incoming.map(d => normalizeDomain(d)).filter(Boolean);
+    const before = readCategory(category);
+    const beforeSet = new Set(before);
+    const toAdd = normalized.filter(d => !beforeSet.has(d));
+    if (toAdd.length > 0) {
+      writeCategory(category, [...before, ...toAdd]);
+      await reloadAdguardFilters();
+    }
+    res.json({
+      success: true,
+      category,
+      received: incoming.length,
+      valid: normalized.length,
+      added: toAdd.length,
+      duplicates: normalized.length - toAdd.length,
+      invalid: incoming.length - normalized.length,
+      total_in_category: before.length + toAdd.length,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/blocklist/remove', async (req, res) => {
   try {
     const domain = normalizeDomain(req.body.domain);
-    writeBlocklistDomains(readBlocklistDomains().filter(item => item !== domain));
+    let removed = false;
+    for (const cat of BLOCKLIST_CATEGORIES) {
+      const list = readCategory(cat);
+      if (list.includes(domain)) {
+        writeCategory(cat, list.filter(d => d !== domain));
+        removed = true;
+      }
+    }
+    if (removed) await reloadAdguardFilters();
+    res.json({ success: true, removed });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Borra todos los dominios de una categoría (o todas si se omite)
+app.post('/api/blocklist/clear', async (req, res) => {
+  try {
+    const target = req.body.category;
+    const cats = target && BLOCKLIST_CATEGORIES.includes(target) ? [target] : BLOCKLIST_CATEGORIES;
+    for (const cat of cats) writeCategory(cat, []);
     await reloadAdguardFilters();
+    res.json({ success: true, cleared: cats });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// === DIAGNÓSTICO: por qué un dominio no se bloquea ===
+app.get('/api/blocklist/diagnose', async (req, res) => {
+  const report = {
+    adguard_reachable: false,
+    protection_enabled: null,
+    filtering_enabled: null,
+    registered_filters: [],
+    expected_filters: BLOCKLIST_CATEGORIES.map(c => ({ category: c, name: BLOCKLIST_NAMES[c], url: adguardUrlFor(c) })),
+    files_on_disk: {},
+    issues: [],
+    test_domain: null,
+  };
+  try {
+    const status = await adguardRequest('/control/status');
+    report.adguard_reachable = true;
+    report.protection_enabled = status.protection_enabled;
+    if (!status.protection_enabled) report.issues.push('AdGuard tiene la protección DESACTIVADA. Actívala en /adguard/ → "Disable protection".');
+    const filtering = await adguardRequest('/control/filtering/status');
+    report.filtering_enabled = filtering.enabled;
+    if (!filtering.enabled) report.issues.push('AdGuard tiene el filtrado DESACTIVADO. Actívalo en Configuración → Reglas de filtrado.');
+    report.registered_filters = (filtering.filters || []).map(f => ({
+      name: f.name, url: f.url, enabled: f.enabled, rules_count: f.rules_count, last_updated: f.last_updated,
+    }));
+    const registeredUrls = new Set(report.registered_filters.map(f => f.url));
+    for (const cat of BLOCKLIST_CATEGORIES) {
+      const url = adguardUrlFor(cat);
+      const file = BLOCKLIST_FILES[cat];
+      const exists = fs.existsSync(file);
+      const lines = exists ? readCategory(cat).length : 0;
+      report.files_on_disk[cat] = { path: file, exists, domain_count: lines };
+      if (!registeredUrls.has(url)) report.issues.push(`Filtro ${cat} NO está registrado en AdGuard (esperado: ${url}).`);
+      else {
+        const reg = report.registered_filters.find(f => f.url === url);
+        if (reg && !reg.enabled) report.issues.push(`Filtro ${cat} está registrado pero DESACTIVADO en AdGuard.`);
+        if (reg && reg.rules_count === 0 && lines > 0) report.issues.push(`Filtro ${cat}: ${lines} dominios en disco pero AdGuard cargó 0 reglas. Probable: AdGuard no puede leer ${url}. Revisa el volumen del contenedor.`);
+      }
+    }
+    // Test opcional: ?domain=ejemplo.com
+    if (req.query.domain) {
+      try {
+        const check = await adguardRequest(`/control/filtering/check_host?name=${encodeURIComponent(String(req.query.domain))}`);
+        report.test_domain = { name: req.query.domain, ...check };
+      } catch (e) { report.test_domain = { name: req.query.domain, error: e.message }; }
+    }
+  } catch (e) {
+    report.issues.push(`No se pudo conectar con AdGuard: ${e.message}`);
+  }
+  if (report.issues.length === 0) report.issues.push('✅ Configuración correcta. Si un dominio sigue sin bloquearse, prueba con ?domain=ejemplo.com');
+  res.json(report);
+});
+
+// Fuerza re-registro y refresh — útil después de un reinstall
+app.post('/api/blocklist/repair', async (req, res) => {
+  try {
+    ensureBlocklistDir();
+    for (const cat of BLOCKLIST_CATEGORIES) {
+      if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
+    }
+    await ensureAdguardConfigured();
+    await postAdguard('/control/filtering/refresh', { whitelist: false });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
