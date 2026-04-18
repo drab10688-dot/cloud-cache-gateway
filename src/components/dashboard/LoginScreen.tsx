@@ -64,9 +64,6 @@ export function LoginScreen({ onLogin }: LoginProps) {
               </div>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground font-mono">
-            100% Docker • Ubuntu Server • Open Source
-          </p>
         </div>
       </div>
 
