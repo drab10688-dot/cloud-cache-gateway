@@ -126,7 +126,10 @@ function generatePCCScript(wans: string[], bridge: string, lans: string[], failo
     `/interface bridge add name=${bridge} comment="NetAdmin: Bridge LAN balanceo"`,
     ...lans.map(l => `/interface bridge port add bridge=${bridge} interface=${l} comment="NetAdmin: LAN port"`),
     "",
-    "# 2. Mangle: Marcar conexiones por PCC",
+    "# 2. Crear routing-tables (RouterOS v7 — REQUERIDO antes de mark-routing)",
+    ...wans.map((_, i) => `/routing table add name=to_WAN${i + 1} fib disabled=no comment="NetAdmin PCC: Tabla WAN${i + 1}"`),
+    "",
+    "# 3. Mangle: Marcar conexiones por PCC",
   ];
 
   wans.forEach((wan, i) => {
@@ -147,7 +150,7 @@ function generatePCCScript(wans: string[], bridge: string, lans: string[], failo
     );
   });
 
-  lines.push("", "# 3. NAT por cada WAN");
+  lines.push("", "# 4. NAT por cada WAN");
   wans.forEach((wan) => {
     lines.push(
       `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade \\`,
@@ -155,10 +158,10 @@ function generatePCCScript(wans: string[], bridge: string, lans: string[], failo
     );
   });
 
-  lines.push("", "# 4. Rutas por marca de ruteo");
+  lines.push("", "# 5. Rutas por tabla (v7: routing-table=, NO routing-mark=)");
   wans.forEach((wan, i) => {
     lines.push(
-      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-mark=to_WAN${i + 1} \\`,
+      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-table=to_WAN${i + 1} \\`,
       `  check-gateway=ping comment="NetAdmin PCC: Ruta ${wan}"`
     );
   });
