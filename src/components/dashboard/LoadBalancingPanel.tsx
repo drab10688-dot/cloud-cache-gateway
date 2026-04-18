@@ -178,6 +178,9 @@ function generateNTHScript(wans: string[], bridge: string, lans: string[], failo
     `/interface bridge add name=${bridge} comment="NetAdmin: Bridge LAN balanceo"`,
     ...lans.map(l => `/interface bridge port add bridge=${bridge} interface=${l}`),
     "",
+    "# Crear routing-tables (RouterOS v7 — REQUERIDO)",
+    ...wans.map((_, i) => `/routing table add name=to_WAN${i + 1} fib disabled=no comment="NetAdmin NTH: Tabla WAN${i + 1}"`),
+    "",
     "# Mangle NTH",
   ];
 
@@ -194,15 +197,18 @@ function generateNTHScript(wans: string[], bridge: string, lans: string[], failo
   wans.forEach((wan, i) => {
     lines.push(
       `/ip firewall mangle add chain=prerouting connection-mark=WAN${i + 1}_conn \\`,
-      `  action=mark-routing new-routing-mark=to_WAN${i + 1} passthrough=yes`
+      `  action=mark-routing new-routing-mark=to_WAN${i + 1} passthrough=yes \\`,
+      `  comment="NetAdmin NTH: Ruteo ${wan}"`
     );
   });
 
-  lines.push("", "# NAT y Rutas");
+  lines.push("", "# NAT y Rutas (v7: routing-table=, NO routing-mark=)");
   wans.forEach((wan, i) => {
     lines.push(
-      `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade`,
-      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-mark=to_WAN${i + 1} check-gateway=ping`
+      `/ip firewall nat add chain=srcnat out-interface=${wan} action=masquerade \\`,
+      `  comment="NetAdmin NTH: NAT ${wan}"`,
+      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} routing-table=to_WAN${i + 1} check-gateway=ping \\`,
+      `  comment="NetAdmin NTH: Ruta ${wan}"`
     );
   });
 
