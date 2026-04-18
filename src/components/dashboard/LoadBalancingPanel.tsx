@@ -141,13 +141,25 @@ function generateWanSetupBlock(wans: string[], wanConfigs: Record<string, WanCon
 }
 
 // ─── Failover script block (shared) ──────────────────────
+// Genera comandos correctos para pegar en el terminal de RouterOS.
+// Notas importantes:
+//  - En RouterOS las comillas internas dentro de "..." se escapan como \"
+//    (un solo backslash). En este código TS escribimos \\" para producir \" literal.
+//  - gateway= en /ip route DEBE ser una IP (no nombre de interfaz). Por eso usamos
+//    la IP del gateway ISP de cada WAN (de wanConfigs) cuando es estática, o
+//    instruimos al usuario a editarla cuando es DHCP.
+//  - El up/down script se mantiene en una sola línea para evitar problemas con
+//    el parser line-by-line.
 
-function generateFailoverBlock(wans: string[]): string {
+function generateFailoverBlock(wans: string[], wanConfigs: Record<string, WanConfig>): string {
   const lines: string[] = [
     "",
     "# ═══════════════════════════════════════════",
     "# FAILOVER AUTOMÁTICO — Netwatch",
     "# ═══════════════════════════════════════════",
+    "# Cada WAN se monitorea con ping a un DNS público vía su propio gateway.",
+    "# Si una WAN cae 3s, sus rutas/mangle con comentario NetAdmin.<wan> se desactivan.",
+    "# Al recuperarse, se reactivan automáticamente.",
     "",
   ];
 
@@ -155,12 +167,40 @@ function generateFailoverBlock(wans: string[]): string {
 
   wans.forEach((wan, i) => {
     const pingIp = pingTargets[i % pingTargets.length];
-    const upScript = `:log warning \\"NetAdmin: ${wan} UP - restaurando rutas\\"; /ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no; /ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no`;
-    const downScript = `:log error \\"NetAdmin: ${wan} DOWN - activando failover\\"; /ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes; /ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes`;
+    const cfg = wanConfigs[wan];
+    const gwIp = cfg?.mode === "static" && cfg.gateway ? cfg.gateway : null;
+
+    // Up/down scripts en UNA sola línea. \" produce comillas escapadas correctas en RouterOS.
+    const upScript =
+      `:log warning \\"NetAdmin: ${wan} UP - restaurando rutas\\"; ` +
+      `/ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no; ` +
+      `/ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no`;
+    const downScript =
+      `:log error \\"NetAdmin: ${wan} DOWN - activando failover\\"; ` +
+      `/ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes; ` +
+      `/ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes`;
+
+    lines.push(`# --- Failover: ${wan} (ping ${pingIp}) ---`);
+
+    if (gwIp) {
+      // Ruta scope=10 forzando salida del ping por la IP del gateway de esta WAN.
+      lines.push(
+        `/ip route add dst-address=${pingIp}/32 gateway=${gwIp} scope=10 comment="NetAdmin Failover: Ping target ${wan}"`,
+      );
+    } else {
+      // DHCP: no conocemos la IP del gateway en tiempo de generación.
+      lines.push(
+        `# ⚠ ${wan} es DHCP. RouterOS necesita una IP en gateway= (no acepta el nombre de interfaz).`,
+        `# Después de aplicar, ejecuta: /ip dhcp-client print  → copia el "gateway" de ${wan}`,
+        `# y reemplaza GW_${wan.toUpperCase()} en la siguiente línea por esa IP:`,
+        `/ip route add dst-address=${pingIp}/32 gateway=GW_${wan.toUpperCase()} scope=10 comment="NetAdmin Failover: Ping target ${wan}"`,
+      );
+    }
+
     lines.push(
-      `# --- Failover: ${wan} (ping ${pingIp}) ---`,
-      `/ip route add dst-address=${pingIp}/32 gateway=${wan} scope=10 comment="NetAdmin Failover: Ping target ${wan}"`,
-      `/tool netwatch add host=${pingIp} interval=10s timeout=3s up-script="${upScript}" down-script="${downScript}" comment="NetAdmin Failover: Monitor ${wan}"`,
+      `/tool netwatch add host=${pingIp} interval=10s timeout=3s ` +
+        `up-script="${upScript}" down-script="${downScript}" ` +
+        `comment="NetAdmin Failover: Monitor ${wan}"`,
       "",
     );
   });
@@ -339,7 +379,7 @@ function generatePCCScript(wans: string[], bridge: string, lans: string[], failo
     );
   });
 
-  if (failover) lines.push(generateFailoverBlock(wans));
+  if (failover) lines.push(generateFailoverBlock(wans, wanConfigs));
 
   return lines.join("\n");
 }
@@ -381,7 +421,7 @@ function generateNTHScript(wans: string[], bridge: string, lans: string[], failo
     );
   });
 
-  if (failover) lines.push(generateFailoverBlock(wans));
+  if (failover) lines.push(generateFailoverBlock(wans, wanConfigs));
 
   return lines.join("\n");
 }
@@ -498,7 +538,7 @@ function generateRoutingScript(
     );
   });
 
-  if (failover) lines.push(generateFailoverBlock(wans));
+  if (failover) lines.push(generateFailoverBlock(wans, wanConfigs));
 
   return lines.join("\n");
 }
