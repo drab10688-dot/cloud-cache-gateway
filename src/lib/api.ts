@@ -108,10 +108,18 @@ export const api = {
 
   // Local blocklist
   getBlocklist: () => apiFetch('/blocklist'),
-  addToBlocklist: (domain: string) =>
-    apiFetch('/blocklist/add', { method: 'POST', body: JSON.stringify({ domain }) }),
+  getBlocklistFull: () => apiFetch('/blocklist/full'),
+  addToBlocklist: (domain: string, category?: string) =>
+    apiFetch('/blocklist/add', { method: 'POST', body: JSON.stringify({ domain, category }) }),
+  bulkAddToBlocklist: (domains: string[], category: string) =>
+    apiFetch('/blocklist/bulk-add', { method: 'POST', body: JSON.stringify({ domains, category }), timeoutMs: 120000 }),
   removeFromBlocklist: (domain: string) =>
     apiFetch('/blocklist/remove', { method: 'POST', body: JSON.stringify({ domain }) }),
+  clearBlocklist: (category?: string) =>
+    apiFetch('/blocklist/clear', { method: 'POST', body: JSON.stringify({ category }) }),
+  diagnoseBlocklist: (testDomain?: string) =>
+    apiFetch(`/blocklist/diagnose${testDomain ? `?domain=${encodeURIComponent(testDomain)}` : ''}`),
+  repairBlocklist: () => apiFetch('/blocklist/repair', { method: 'POST', timeoutMs: 30000 }),
   getBlocklistUpdateStatus: () => apiFetch('/blocklist/update-status'),
   getBlocklistUpdateLog: () => apiFetch('/blocklist/update-log'),
   triggerBlocklistUpdate: () => apiFetch('/blocklist/update-now', { method: 'POST' }),
