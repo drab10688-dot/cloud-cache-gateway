@@ -123,6 +123,8 @@ export function DnsBlocklist() {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updating, setUpdating] = useState(false);
   const [visibleCount, setVisibleCount] = useState(200);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnoseReport, setDiagnoseReport] = useState<any>(null);
 
   // Upload state
   const [uploadCategory, setUploadCategory] = useState<FilterCategory>("mintic");
@@ -144,14 +146,19 @@ export function DnsBlocklist() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [domains, stats, updStatus] = await Promise.all([
-        api.getBlocklist(),
+      const [full, stats, updStatus] = await Promise.all([
+        api.getBlocklistFull().catch(async () => {
+          const list = await api.getBlocklist();
+          return (list as string[]).map(d => ({ domain: ruleToDomain(d), category: "manual" }));
+        }),
         api.getAdGuardStats().catch(() => null),
         api.getBlocklistUpdateStatus().catch(() => null),
       ]);
-      const mapped: BlockedDomain[] = (domains as string[]).map((raw: string) => ({
-        domain: ruleToDomain(raw), reason: "Lista local", category: "manual" as FilterCategory, active: true,
-      }));
+      const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
+      const mapped: BlockedDomain[] = (full as Array<{ domain: string; category: string }>).map(item => {
+        const cat = (["manual", "mintic", "coljuegos", "infantil"].includes(item.category) ? item.category : "manual") as FilterCategory;
+        return { domain: item.domain, reason: reasons[cat] || "Manual", category: cat, active: true };
+      });
       setBlocklist(mapped);
       setAdguardStats(stats);
       if (updStatus) setUpdateStatus(updStatus);
@@ -167,16 +174,15 @@ export function DnsBlocklist() {
       return;
     }
     try {
-      // Send AdGuard rule format: ||domain^$important
-      await api.addToBlocklist(toAdGuardRule(normalized));
+      await api.addToBlocklist(normalized, newCategory);
       const reasons: Record<string, string> = { mintic: "MinTIC", infantil: "Protección infantil", coljuegos: "Coljuegos", manual: "Manual" };
       setBlocklist([{ domain: normalized, reason: reasons[newCategory] || "Manual", category: newCategory, active: true }, ...blocklist.filter(item => item.domain !== normalized)]);
       setNewDomain("");
-      toast({ title: "Dominio agregado", description: `${normalized} fue añadido al blocklist` });
+      toast({ title: "Dominio agregado", description: `${normalized} → AdGuard recargado` });
     } catch (e: any) {
       toast({
         title: "No se pudo agregar el dominio",
-        description: e?.message || "Error desconocido. Verifica que el backend esté corriendo y que estés autenticado.",
+        description: e?.message || "Verifica que el backend esté corriendo y autenticado.",
         variant: "destructive",
       });
     }
@@ -184,21 +190,14 @@ export function DnsBlocklist() {
 
   const removeDomain = async (domain: string) => {
     try {
-      // Backend should accept either the bare domain or the rule; send rule for an exact match.
-      await api.removeFromBlocklist(toAdGuardRule(domain));
+      await api.removeFromBlocklist(domain);
       setBlocklist(blocklist.filter(b => b.domain !== domain));
-    } catch (e1: any) {
-      // Fallback: try removing by bare domain (for legacy entries)
-      try {
-        await api.removeFromBlocklist(domain);
-        setBlocklist(blocklist.filter(b => b.domain !== domain));
-      } catch (e2: any) {
-        toast({
-          title: "No se pudo eliminar",
-          description: e2?.message || e1?.message || "Error de conexión con el backend",
-          variant: "destructive",
-        });
-      }
+    } catch (e: any) {
+      toast({
+        title: "No se pudo eliminar",
+        description: e?.message || "Error de conexión con el backend",
+        variant: "destructive",
+      });
     }
   };
 
@@ -221,42 +220,75 @@ export function DnsBlocklist() {
     }
   };
 
-  // File upload handler
+  // Diagnóstico: pregunta al backend por qué un dominio no se bloquea
+  const runDiagnose = async () => {
+    setDiagnosing(true);
+    setDiagnoseReport(null);
+    try {
+      const report: any = await api.diagnoseBlocklist();
+      setDiagnoseReport(report);
+      const issues = (report.issues || []) as string[];
+      const ok = issues.length === 1 && issues[0].startsWith("✅");
+      // Auto-reparar si AdGuard no tiene los filtros registrados
+      if (!ok && issues.some(i => i.includes("NO está registrado") || i.includes("DESACTIVADO"))) {
+        toast({ title: "Reparando...", description: "Re-registrando filtros en AdGuard" });
+        try {
+          await api.repairBlocklist();
+          const fixed: any = await api.diagnoseBlocklist();
+          setDiagnoseReport(fixed);
+          toast({ title: "✅ Reparado", description: "Filtros re-registrados. Refresca AdGuard para verlos." });
+        } catch (e: any) {
+          toast({ title: "No se pudo reparar", description: e?.message || "Error", variant: "destructive" });
+        }
+      } else if (ok) {
+        toast({ title: "✅ Bloqueo OK", description: "AdGuard está configurado correctamente" });
+      } else {
+        toast({ title: `⚠️ ${issues.length} problema(s)`, description: issues[0], variant: "destructive" });
+      }
+    } catch (e: any) {
+      toast({ title: "Diagnóstico falló", description: e?.message || "Backend no responde", variant: "destructive" });
+    } finally {
+      setDiagnosing(false);
+    }
+  };
+
+
   const handleFileUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setUploading(true);
     setUploadResult(null);
 
+    let totalParsed = 0;
     let totalAdded = 0;
     let totalDuplicates = 0;
     let totalInvalid = 0;
-    let totalParsed = 0;
     let firstError: string | null = null;
-    const existingDomains = new Set(blocklist.map(b => b.domain));
+    const allDomains: string[] = [];
 
     for (const file of Array.from(files)) {
       try {
         const content = await file.text();
         const domains = parseDomains(content);
         totalParsed += domains.length;
-
-        for (const domain of domains) {
-          if (existingDomains.has(domain)) {
-            totalDuplicates++;
-            continue;
-          }
-          try {
-            await api.addToBlocklist(toAdGuardRule(domain));
-            existingDomains.add(domain);
-            totalAdded++;
-          } catch (e: any) {
-            if (!firstError) firstError = e?.message || "Error desconocido";
-            totalInvalid++;
-          }
-        }
+        allDomains.push(...domains);
       } catch (e: any) {
         if (!firstError) firstError = `Lectura del archivo: ${e?.message || "error"}`;
         totalInvalid += 1;
+      }
+    }
+
+    if (allDomains.length > 0) {
+      const CHUNK = 5000;
+      try {
+        for (let i = 0; i < allDomains.length; i += CHUNK) {
+          const chunk = allDomains.slice(i, i + CHUNK);
+          const result: any = await api.bulkAddToBlocklist(chunk, uploadCategory);
+          totalAdded += result.added || 0;
+          totalDuplicates += result.duplicates || 0;
+          totalInvalid += result.invalid || 0;
+        }
+      } catch (e: any) {
+        if (!firstError) firstError = e?.message || "Error en bulk-add";
       }
     }
 
@@ -269,22 +301,20 @@ export function DnsBlocklist() {
     });
     setUploading(false);
 
-    if (totalAdded === 0 && totalInvalid > 0) {
+    if (totalAdded === 0 && (totalInvalid > 0 || firstError)) {
       toast({
         title: "No se agregó ningún dominio",
-        description: firstError
-          ? `Backend respondió: ${firstError}`
-          : "Verifica que el backend esté corriendo y autenticado.",
+        description: firstError ? `Backend: ${firstError}` : "Verifica el backend.",
         variant: "destructive",
       });
     } else if (totalAdded > 0) {
       toast({
-        title: "Lista cargada",
-        description: `${totalAdded} dominios agregados, ${totalDuplicates} duplicados, ${totalInvalid} fallidos.`,
+        title: "Lista cargada en AdGuard",
+        description: `${totalAdded} agregados, ${totalDuplicates} duplicados, ${totalInvalid} inválidos. AdGuard recargado.`,
       });
     }
 
-    fetchData(); // Refresh list
+    fetchData();
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -440,14 +470,59 @@ export function DnsBlocklist() {
               </p>
             </div>
           </div>
-          <Button onClick={triggerUpdate} disabled={updating} variant="outline" className="gap-2">
-            {updating ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Actualizando...</>
-            ) : (
-              <><RefreshCw className="h-4 w-4" /> Actualizar ahora</>
-            )}
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={runDiagnose} disabled={diagnosing} variant="outline" className="gap-2">
+              {diagnosing ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Diagnosticando...</>
+              ) : (
+                <><Shield className="h-4 w-4" /> Diagnosticar</>
+              )}
+            </Button>
+            <Button onClick={triggerUpdate} disabled={updating} variant="outline" className="gap-2">
+              {updating ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Actualizando...</>
+              ) : (
+                <><RefreshCw className="h-4 w-4" /> Actualizar ahora</>
+              )}
+            </Button>
+          </div>
         </div>
+
+        {/* Reporte de diagnóstico */}
+        {diagnoseReport && (
+          <div className="mt-4 p-4 rounded-md bg-secondary/50 border border-border text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-foreground">Reporte de diagnóstico</span>
+              <button onClick={() => setDiagnoseReport(null)} className="text-muted-foreground hover:text-foreground">✕</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>AdGuard accesible: <span className={diagnoseReport.adguard_reachable ? "text-success" : "text-destructive"}>{diagnoseReport.adguard_reachable ? "Sí" : "No"}</span></div>
+              <div>Protección activa: <span className={diagnoseReport.protection_enabled ? "text-success" : "text-destructive"}>{String(diagnoseReport.protection_enabled)}</span></div>
+              <div>Filtrado activo: <span className={diagnoseReport.filtering_enabled ? "text-success" : "text-destructive"}>{String(diagnoseReport.filtering_enabled)}</span></div>
+              <div>Filtros registrados: <span className="font-mono text-foreground">{diagnoseReport.registered_filters?.length || 0}</span></div>
+            </div>
+            {diagnoseReport.files_on_disk && (
+              <div className="space-y-1 pt-2 border-t border-border">
+                {Object.entries(diagnoseReport.files_on_disk).map(([cat, info]: [string, any]) => {
+                  const reg = diagnoseReport.registered_filters?.find((f: any) => f.url?.endsWith(`netadmin_${cat}.txt`));
+                  return (
+                    <div key={cat} className="flex justify-between font-mono">
+                      <span className="text-muted-foreground">{cat}:</span>
+                      <span className="text-foreground">
+                        disco: {info.domain_count} · adguard: {reg?.rules_count ?? "—"} {reg?.enabled === false && <span className="text-destructive">(off)</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="space-y-1 pt-2 border-t border-border">
+              {(diagnoseReport.issues || []).map((issue: string, i: number) => (
+                <p key={i} className={issue.startsWith("✅") ? "text-success" : "text-destructive"}>• {issue}</p>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
