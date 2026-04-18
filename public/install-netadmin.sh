@@ -991,6 +991,8 @@ app.get('/api/adguard/querylog', proxyAdGuard('/control/querylog?limit=100'));
 app.get('/api/adguard/filtering', proxyAdGuard('/control/filtering/status'));
 app.post('/api/adguard/filtering/add', proxyAdGuard('/control/filtering/add_url', 'POST'));
 app.post('/api/adguard/filtering/remove', proxyAdGuard('/control/filtering/remove_url', 'POST'));
+app.post('/api/adguard/filtering/set', proxyAdGuard('/control/filtering/set_url', 'POST'));
+app.post('/api/adguard/filtering/refresh', proxyAdGuard('/control/filtering/refresh', 'POST'));
 
 // Lista plana de dominios (compat hacia atrás con el frontend actual)
 app.get('/api/blocklist', (req, res) => {
@@ -1060,6 +1062,27 @@ app.post('/api/blocklist/remove', async (req, res) => {
     }
     if (removed) await reloadAdguardFilters();
     res.json({ success: true, removed });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Eliminación por lote: borra N dominios con UN solo refresh de AdGuard
+app.post('/api/blocklist/bulk-remove', async (req, res) => {
+  try {
+    const incoming = Array.isArray(req.body.domains) ? req.body.domains : [];
+    const targets = new Set(incoming.map(d => normalizeDomain(d)).filter(Boolean));
+    if (targets.size === 0) return res.json({ success: true, removed: 0 });
+    let removed = 0;
+    for (const cat of BLOCKLIST_CATEGORIES) {
+      const list = readCategory(cat);
+      const kept = list.filter(d => !targets.has(d));
+      const diff = list.length - kept.length;
+      if (diff > 0) {
+        writeCategory(cat, kept);
+        removed += diff;
+      }
+    }
+    if (removed > 0) await reloadAdguardFilters();
+    res.json({ success: true, removed, requested: incoming.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
