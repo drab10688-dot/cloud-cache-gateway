@@ -107,9 +107,8 @@ function generateFailoverBlock(wans: string[]): string {
   lines.push(
     "# Ruta de respaldo global (último recurso)",
     ...wans.map((wan, i) =>
-      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} distance=${i + 10} check-gateway=ping \\`,
+      `/ip route add dst-address=0.0.0.0/0 gateway=${wan} distance=${i + 10} check-gateway=ping comment="NetAdmin Failover: Backup ${wan}"`
     ),
-    `  comment="NetAdmin Failover: Ruta backup"`,
   );
 
   return lines.join("\n");
