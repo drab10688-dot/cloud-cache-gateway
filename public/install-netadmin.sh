@@ -1157,19 +1157,80 @@ app.get('/api/blocklist/diagnose', async (req, res) => {
 });
 
 // Fuerza re-registro y refresh — útil después de un reinstall o si algo se desincroniza
+// Devuelve un reporte detallado de qué pasó con cada lista (para depurar desde el panel)
 app.post('/api/blocklist/repair', async (req, res) => {
+  const report = { success: true, steps: [], filters: [], errors: [] };
   try {
     ensureBlocklistDir();
+    report.steps.push(`Directorio listo: ${BLOCKLIST_DIR}`);
+
+    // 1. Crear archivos vacíos válidos si no existen (con header AdGuard)
     for (const cat of BLOCKLIST_CATEGORIES) {
-      if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
+      if (!fs.existsSync(BLOCKLIST_FILES[cat])) {
+        writeCategory(cat, []);
+        report.steps.push(`Creado archivo vacío: netadmin_${cat}.txt`);
+      } else {
+        const stat = fs.statSync(BLOCKLIST_FILES[cat]);
+        report.steps.push(`Existe: netadmin_${cat}.txt (${stat.size} bytes)`);
+      }
     }
-    // Limpiar user_rules viejas (reglas que el usuario pudo haber metido manualmente y no funcionaban)
-    try { await postAdguard('/control/filtering/set_rules', { rules: [] }); }
-    catch (e) { console.warn(`[repair] No se pudo limpiar user_rules: ${e.message}`); }
-    await ensureAdguardConfigured();
-    await postAdguard('/control/filtering/refresh', { whitelist: false });
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+
+    // 2. Asegurar permisos legibles para nginx (mount :ro)
+    try {
+      execSync(`chmod 755 ${BLOCKLIST_DIR} && chmod 644 ${BLOCKLIST_DIR}/netadmin_*.txt`);
+      report.steps.push('Permisos ajustados (755 dir, 644 archivos)');
+    } catch (e) { report.errors.push(`chmod: ${e.message}`); }
+
+    // 3. Verificar que nginx sirve cada URL (HEAD test desde el contenedor api)
+    for (const cat of BLOCKLIST_CATEGORIES) {
+      const url = adguardUrlFor(cat);
+      try {
+        const code = execSync(`wget -q --spider --server-response "${url}" 2>&1 | grep "HTTP/" | tail -1 | awk '{print $2}'`).toString().trim();
+        report.steps.push(`HTTP ${code} → ${url}`);
+        if (code !== '200') report.errors.push(`nginx no sirve ${cat}: HTTP ${code}`);
+      } catch (e) { report.errors.push(`wget ${cat}: ${e.message}`); }
+    }
+
+    // 4. Limpiar user_rules viejas
+    try {
+      await postAdguard('/control/filtering/set_rules', { rules: [] });
+      report.steps.push('user_rules limpiadas');
+    } catch (e) { report.errors.push(`set_rules: ${e.message}`); }
+
+    // 5. Registrar / asegurar las 4 listas en AdGuard
+    try {
+      await ensureAdguardConfigured();
+      report.steps.push('ensureAdguardConfigured() OK');
+    } catch (e) {
+      report.errors.push(`ensureAdguardConfigured: ${e.message}`);
+      report.success = false;
+    }
+
+    // 6. Refresh AdGuard
+    try {
+      await postAdguard('/control/filtering/refresh', { whitelist: false });
+      report.steps.push('AdGuard refresh OK');
+    } catch (e) { report.errors.push(`refresh: ${e.message}`); }
+
+    // 7. Confirmar qué filtros quedaron registrados (verificación final)
+    try {
+      const status = await adguardRequest('/control/filtering/status');
+      const netadminFilters = (status.filters || []).filter(f => (f.name || '').toLowerCase().includes('netadmin'));
+      report.filters = netadminFilters.map(f => ({
+        name: f.name, url: f.url, enabled: f.enabled, rules_count: f.rules_count, last_updated: f.last_updated,
+      }));
+      if (netadminFilters.length < BLOCKLIST_CATEGORIES.length) {
+        report.success = false;
+        report.errors.push(`Solo ${netadminFilters.length}/${BLOCKLIST_CATEGORIES.length} listas NetAdmin quedaron registradas`);
+      }
+    } catch (e) { report.errors.push(`status final: ${e.message}`); }
+
+    res.json(report);
+  } catch (e) {
+    report.success = false;
+    report.errors.push(`fatal: ${e.message}`);
+    res.status(500).json(report);
+  }
 });
 
 // === BLOCKLIST AUTO-UPDATE STATUS ===

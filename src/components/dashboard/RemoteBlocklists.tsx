@@ -175,14 +175,30 @@ export function RemoteBlocklists() {
 
   // Fuerza el registro de las 4 listas internas NetAdmin en AdGuard.
   // Útil tras una reinstalación o si AdGuard fue reseteado y perdió la config.
+  // Muestra el reporte detallado del backend para depurar si algo falla.
   const publishNetAdminLists = async () => {
     setPublishing(true);
     try {
-      await api.repairBlocklist();
-      toast({
-        title: "✅ Listas NetAdmin publicadas",
-        description: "Las 4 listas internas (Manual, MinTIC, Coljuegos, Infantil) están registradas y activas en AdGuard",
-      });
+      const report: any = await api.repairBlocklist();
+      const okCount = report?.filters?.length || 0;
+      const errCount = report?.errors?.length || 0;
+
+      if (report?.success && okCount === 4) {
+        toast({
+          title: "✅ 4 listas NetAdmin publicadas",
+          description: `Manual, MinTIC, Coljuegos, Infantil registradas en AdGuard`,
+        });
+      } else {
+        // Mostrar el primer error real para que el operador sepa qué pasa
+        const firstError = report?.errors?.[0] || "Causa desconocida";
+        toast({
+          title: `⚠ Solo ${okCount}/4 listas registradas`,
+          description: firstError,
+          variant: "destructive",
+        });
+        // Log completo en consola para depuración
+        console.error('[publishNetAdminLists] Reporte completo:', report);
+      }
       await fetchFilters();
     } catch (e: any) {
       toast({ title: "No se pudo publicar", description: e?.message || "Error", variant: "destructive" });
