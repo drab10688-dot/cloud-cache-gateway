@@ -217,38 +217,33 @@ function generateNTHScript(wans: string[], bridge: string, lans: string[], failo
 }
 
 function generateBondingScript(wans: string[], bridge: string, lans: string[], failover: boolean): string {
+  const mode = failover ? "active-backup" : "balance-rr";
   const lines: string[] = [
-    `# === NetAdmin: Bonding con ${wans.length} interfaces + ${failover ? "Failover" : "Sin Failover"} ===`,
+    `# === NetAdmin: Bonding con ${wans.length} interfaces (${mode}) ===`,
+    `# IMPORTANTE (RouterOS v7): los slaves del bonding NO deben tener IP ni pertenecer a otro bridge.`,
+    `# Si fallan los siguientes comandos por "device already added", remueve manualmente:`,
+    `#   /interface bridge port remove [find interface=${wans[0]}]`,
     "",
-    `# Modo active-backup: si una interfaz cae, el bonding conmuta automáticamente`,
-    `/interface bonding add name=bond-wan mode=${failover ? "active-backup" : "balance-rr"} \\`,
-    `  slaves=${wans.join(",")} primary=${wans[0]} \\`,
-    `  comment="NetAdmin: Bonding WAN ${failover ? "(active-backup failover)" : "(round-robin)"}"`,
+    `# 1. Crear bonding sobre las WANs`,
+    `/interface bonding add name=bond-wan mode=${mode} slaves=${wans.join(",")} primary=${wans[0]} comment="NetAdmin: Bonding WAN (${mode})"`,
     "",
+    `# 2. Crear bridge LAN`,
     `/interface bridge add name=${bridge} comment="NetAdmin: Bridge LAN"`,
-    ...lans.map(l => `/interface bridge port add bridge=${bridge} interface=${l}`),
+    ...lans.map(l => `/interface bridge port add bridge=${bridge} interface=${l} comment="NetAdmin: LAN port"`),
     "",
-    `/ip firewall nat add chain=srcnat out-interface=bond-wan action=masquerade \\`,
-    `  comment="NetAdmin: NAT Bonding"`,
-    `/ip route add dst-address=0.0.0.0/0 gateway=bond-wan check-gateway=ping \\`,
-    `  comment="NetAdmin: Ruta Bonding"`,
+    `# 3. NAT y ruta default sobre el bonding`,
+    `/ip firewall nat add chain=srcnat out-interface=bond-wan action=masquerade comment="NetAdmin: NAT Bonding"`,
+    `/ip route add dst-address=0.0.0.0/0 gateway=bond-wan check-gateway=ping comment="NetAdmin: Ruta Bonding"`,
   ];
 
   if (failover) {
     lines.push(
       "",
       "# ═══ Failover Bonding ═══",
-      "# El modo active-backup ya incluye failover nativo.",
-      "# Adicionalmente, Netwatch monitorea conectividad externa:",
+      "# active-backup ya conmuta automáticamente al slave activo si el primary cae.",
+      "# Netwatch adicional para alertar pérdida total de conectividad:",
       "",
-      `/tool netwatch add host=8.8.8.8 interval=10s timeout=3s \\`,
-      `  down-script="\\`,
-      `/log error \\"NetAdmin: Bonding sin conectividad externa\\";\\`,
-      `" \\`,
-      `  up-script="\\`,
-      `/log warning \\"NetAdmin: Bonding conectividad restaurada\\";\\`,
-      `" \\`,
-      `  comment="NetAdmin Failover: Monitor Bonding"`,
+      `/tool netwatch add host=8.8.8.8 interval=10s timeout=3s up-script=":log warning \\"NetAdmin: Bonding conectividad restaurada\\"" down-script=":log error \\"NetAdmin: Bonding sin conectividad externa\\"" comment="NetAdmin Failover: Monitor Bonding"`,
     );
   }
 
