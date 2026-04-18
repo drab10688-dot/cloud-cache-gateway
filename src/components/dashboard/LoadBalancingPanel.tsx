@@ -1060,7 +1060,28 @@ export function LoadBalancingPanel() {
         }, []);
 
       const result = await mikrotikDeviceApi.execute(commands);
-      setExecResult({ success: result.success, message: result.message || "Script aplicado correctamente" });
+
+      // Extract per-command failures from results so the user sees which lines failed.
+      const failures: { cmd: string; error: string }[] = [];
+      if (Array.isArray(result.results)) {
+        result.results.forEach((entry: any) => {
+          if (entry && entry.success === false) {
+            failures.push({
+              cmd: String(entry.cmd || entry.command || "").slice(0, 200),
+              error: String(entry.error || entry.message || "Error desconocido"),
+            });
+          }
+        });
+      }
+
+      const ok = result.success && failures.length === 0;
+      setExecResult({
+        success: ok,
+        message: ok
+          ? (result.message || "Script aplicado correctamente")
+          : `${failures.length || 1} comando(s) fallaron de ${commands.length} ejecutados`,
+        failures: failures.length ? failures : undefined,
+      });
     } catch (e: any) {
       setExecResult({ success: false, message: e.message || "Error al ejecutar" });
     } finally {
