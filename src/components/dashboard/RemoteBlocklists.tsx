@@ -268,21 +268,22 @@ export function RemoteBlocklists() {
         </p>
         <div className="flex flex-wrap gap-2">
           {suggestedLists.map((s) => {
-            // Match por URL exacta o por nombre (las internas pueden cambiar de host)
             const exists = filters.some(f =>
               f.url === s.url ||
               (s.internal && f.name === s.name)
             );
+            // Internas: siempre clicables (para asegurar/reparar las 4 a la vez)
+            const clickable = s.internal || !exists;
             return (
               <button
                 key={s.url}
-                onClick={() => !exists && addFromSuggested(s)}
-                disabled={exists || adding}
-                title={s.description}
+                onClick={() => clickable && addFromSuggested(s)}
+                disabled={!clickable || adding}
+                title={s.internal ? `${s.description} — clic para asegurar las 4 categorías NetAdmin en AdGuard` : s.description}
                 className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
                   exists
                     ? s.internal
-                      ? "bg-primary/10 border-primary/40 text-primary cursor-default"
+                      ? "bg-primary/15 border-primary/50 text-primary hover:bg-primary/25 cursor-pointer"
                       : "bg-success/10 border-success/30 text-success cursor-default"
                     : s.internal
                       ? "bg-primary/5 border-primary/30 text-primary hover:bg-primary/15"
