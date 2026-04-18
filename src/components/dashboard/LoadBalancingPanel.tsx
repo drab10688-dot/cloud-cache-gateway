@@ -1196,7 +1196,7 @@ export function LoadBalancingPanel() {
       const next = exists ? prev.filter(w => w !== name) : [...prev, name];
       // Initialize config if newly added
       if (!exists) {
-        setWanConfigs(c => c[name] ? c : { ...c, [name]: { mode: "dhcp", ip: "", cidr: 24, gateway: "" } });
+        setWanConfigs(c => c[name] ? c : { ...c, [name]: { mode: "dhcp", ip: "", cidr: 24, gateway: "", capacity: 1 } });
       }
       return next;
     });
@@ -1209,7 +1209,7 @@ export function LoadBalancingPanel() {
   };
 
   const updateWanConfig = (wan: string, patch: Partial<WanConfig>) => {
-    setWanConfigs(c => ({ ...c, [wan]: { ...(c[wan] || { mode: "dhcp", ip: "", cidr: 24, gateway: "" }), ...patch } }));
+    setWanConfigs(c => ({ ...c, [wan]: { ...(c[wan] || { mode: "dhcp", ip: "", cidr: 24, gateway: "", capacity: 1 }), ...patch } }));
     setBalanceScript(null);
   };
 
@@ -1384,7 +1384,7 @@ export function LoadBalancingPanel() {
                   </h3>
                   <div className="space-y-4">
                     {selectedWans.map(wan => {
-                      const cfg = wanConfigs[wan] || { mode: "dhcp" as WanMode, ip: "", cidr: 24, gateway: "" };
+                      const cfg = wanConfigs[wan] || { mode: "dhcp" as WanMode, ip: "", cidr: 24, gateway: "", capacity: 1 };
                       return (
                         <div key={`cfg-${wan}`} className="p-4 bg-secondary/30 border border-border rounded-lg">
                           <div className="flex items-center justify-between mb-3">
