@@ -963,7 +963,7 @@ export function LoadBalancingPanel() {
   // Script & execution
   const [generatedScript, setGeneratedScript] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
-  const [execResult, setExecResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [execResult, setExecResult] = useState<{ success: boolean; message: string; failures?: { cmd: string; error: string }[] } | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
