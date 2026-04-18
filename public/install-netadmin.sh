@@ -2293,6 +2293,24 @@ app.post('/api/telegram/alert', requireAuth, async (req, res) => {
 
 app.listen(API_PORT, '0.0.0.0', () => {
   console.log(`NetAdmin API v4.0 → http://0.0.0.0:${API_PORT}`);
+  // Auto-bootstrap blocklists: espera a AdGuard, limpia filtros viejos, registra los 4 NetAdmin
+  (async () => {
+    ensureBlocklistDir();
+    for (const cat of BLOCKLIST_CATEGORIES) {
+      if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
+    }
+    for (let i = 0; i < 30; i++) {
+      try {
+        await ensureAdguardConfigured();
+        await postAdguard('/control/filtering/refresh', { whitelist: false });
+        console.log('[blocklist] AdGuard configurado: 4 filtros NetAdmin registrados vía http://netadmin-nginx/blocklists/');
+        return;
+      } catch (e) {
+        if (i === 29) console.warn(`[blocklist] No se pudo auto-configurar AdGuard tras 30 intentos: ${e.message}`);
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+  })();
 });
 API_JS
 
