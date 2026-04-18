@@ -685,18 +685,33 @@ export function MikroTikPanel() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
                 <div className="bg-card rounded-md p-2 border border-border">
                   <p className="text-foreground font-semibold mb-1">🔍 TTL Variable</p>
-                  <p>Windows=128, Linux/Android=64, iOS=64. El proveedor ve distintos TTLs → múltiples dispositivos.</p>
-                  <p className="text-success mt-1">✓ Solución: Normalizar todo a TTL=64</p>
+                  <p>Windows=128, Linux=64, iOS=64. TTLs distintos delatan múltiples dispositivos.</p>
+                  <p className="text-success mt-1">✓ Normalizar a TTL=64</p>
                 </div>
                 <div className="bg-card rounded-md p-2 border border-border">
-                  <p className="text-foreground font-semibold mb-1">📊 Conexiones Masivas</p>
-                  <p>Un solo usuario no abre 500+ conexiones TCP simultáneas. Muchas = sospechoso.</p>
-                  <p className="text-success mt-1">✓ Solución: Limitar conn/cliente</p>
+                  <p className="text-foreground font-semibold mb-1">📦 MSS / MTU mixto</p>
+                  <p>Fibra=1500, PPPoE=1480, VPN=1400. Variedad delata clientes distintos.</p>
+                  <p className="text-success mt-1">✓ MSS uniforme 1380 (Starlink-safe)</p>
                 </div>
                 <div className="bg-card rounded-md p-2 border border-border">
-                  <p className="text-foreground font-semibold mb-1">📦 Fingerprint TCP</p>
-                  <p>El tamaño MSS varía entre OS. Patrón mixto = varios dispositivos.</p>
-                  <p className="text-success mt-1">✓ Solución: MSS uniforme 1360</p>
+                  <p className="text-foreground font-semibold mb-1">🎬 QUIC / HTTP3 (UDP 443)</p>
+                  <p>YouTube/Google multiplexan sesiones por QUIC → Starlink cuenta endpoints únicos.</p>
+                  <p className="text-success mt-1">✓ Bloquear UDP 443/80 → fuerza TCP</p>
+                </div>
+                <div className="bg-card rounded-md p-2 border border-border">
+                  <p className="text-foreground font-semibold mb-1">📊 Conexiones masivas</p>
+                  <p>Un hogar normal no abre 500+ conexiones TCP simultáneas.</p>
+                  <p className="text-success mt-1">✓ connection-limit por IP LAN</p>
+                </div>
+                <div className="bg-card rounded-md p-2 border border-border">
+                  <p className="text-foreground font-semibold mb-1">⏱️ Sesiones NAT acumuladas</p>
+                  <p>Tablas conntrack grandes con timeouts largos = patrón de carrier, no hogar.</p>
+                  <p className="text-success mt-1">✓ NAT timeouts agresivos (UDP 30s)</p>
+                </div>
+                <div className="bg-card rounded-md p-2 border border-border">
+                  <p className="text-foreground font-semibold mb-1">⚠️ Paquetes inválidos</p>
+                  <p>RST/FIN huérfanos revelan endpoints internos al pasar por NAT.</p>
+                  <p className="text-success mt-1">✓ Drop connection-state=invalid</p>
                 </div>
               </div>
             </div>
@@ -705,39 +720,57 @@ export function MikroTikPanel() {
 
         <CopyBlock
           field="stealth-mode"
-          code={`# ═══ MODO STEALTH — Anti-Detección de Múltiples Hosts ═══
+          code={`# ═══ MODO STEALTH v2 — Anti-Detección Starlink/ISP ═══
+# Combina: TTL=64, MSS=1380, Block QUIC, Connection-limit, NAT timeouts agresivos
 
-# 1) TTL Normalization — Todo el tráfico sale con TTL=64
-#    (Parece un solo dispositivo Linux/Android)
+# 1) TTL Normalization — todo el tráfico sale con TTL=64
 /ip firewall mangle add chain=postrouting \\
-  action=change-ttl new-ttl=set:64 \\
-  passthrough=yes \\
+  action=change-ttl new-ttl=set:64 passthrough=yes \\
   comment="NetAdmin Stealth: TTL normalize to 64"
 
 /ip firewall mangle add chain=forward \\
-  action=change-ttl new-ttl=set:64 \\
-  passthrough=yes \\
+  action=change-ttl new-ttl=set:64 passthrough=yes \\
   comment="NetAdmin Stealth: TTL forward normalize"
 
-# 2) Límite de conexiones simultáneas por IP cliente
-#    (Evita que un solo cliente genere demasiadas conexiones)
+# 2) MSS uniforme 1380 (Starlink-safe + oculta MTU mixto interno)
+/ip firewall mangle add chain=postrouting protocol=tcp \\
+  tcp-flags=syn action=change-mss new-mss=1380 passthrough=yes \\
+  comment="NetAdmin Stealth: Uniform MSS 1380"
+
+/ip firewall mangle add chain=forward protocol=tcp \\
+  tcp-flags=syn action=change-mss new-mss=1380 passthrough=yes \\
+  comment="NetAdmin Stealth: Uniform MSS forward"
+
+# 3) Bloqueo QUIC/HTTP3 — fuerza TCP, evita multiplexado UDP detectable
+/ip firewall filter add chain=forward protocol=udp dst-port=443 \\
+  action=drop comment="NetAdmin Stealth: Block QUIC 443"
+
+/ip firewall filter add chain=forward protocol=udp dst-port=80 \\
+  action=drop comment="NetAdmin Stealth: Block HTTP3 80"
+
+# 4) Connection-limit por IP LAN — simula un solo hogar residencial
 /ip firewall filter add chain=forward protocol=tcp \\
-  connection-limit=200,32 action=drop \\
-  comment="NetAdmin Stealth: Limit TCP conn/client"
+  src-address=192.168.0.0/16 connection-limit=200,32 action=drop \\
+  comment="NetAdmin Stealth: Limit TCP conn/host LAN"
 
 /ip firewall filter add chain=forward protocol=udp \\
-  connection-limit=100,32 action=drop \\
-  comment="NetAdmin Stealth: Limit UDP conn/client"
+  src-address=192.168.0.0/16 connection-limit=100,32 action=drop \\
+  comment="NetAdmin Stealth: Limit UDP conn/host LAN"
 
-# 3) MSS Uniforme — Elimina fingerprinting por tamaño de paquete
-/ip firewall mangle add chain=postrouting protocol=tcp \\
-  tcp-flags=syn action=change-mss new-mss=1360 \\
-  passthrough=yes \\
-  comment="NetAdmin Stealth: Uniform MSS 1360"
+# 5) NAT timeouts agresivos — evita acumular sesiones detectables
+/ip firewall connection tracking set \\
+  udp-timeout=30s udp-stream-timeout=120s \\
+  tcp-established-timeout=1h tcp-time-wait-timeout=10s \\
+  tcp-close-timeout=10s generic-timeout=60s
+
+# 6) Drop conexiones inválidas (Starlink las usa para contar endpoints)
+/ip firewall filter add chain=forward connection-state=invalid \\
+  action=drop comment="NetAdmin Stealth: Drop invalid (anti-fingerprint)"
 
 # ═══ Verificar que Stealth está activo ═══
 /ip firewall mangle print where comment~"Stealth"
-/ip firewall filter print where comment~"Stealth"`}
+/ip firewall filter print where comment~"Stealth"
+/ip firewall connection tracking print`}
         />
         <ExecuteButton step={9} />
 

@@ -55,17 +55,26 @@ export function getStepCommands(step: number, serverIp: string, totalBw: number 
       return [
         { method: 'POST', endpoint: '/rest/ip/firewall/connection/tracking/set', body: { 'udp-timeout': '30s', 'udp-stream-timeout': '120s', 'icmp-timeout': '10s', 'generic-timeout': '120s', 'tcp-close-timeout': '10s', 'tcp-close-wait-timeout': '10s', 'tcp-fin-wait-timeout': '10s', 'tcp-last-ack-timeout': '10s', 'tcp-time-wait-timeout': '10s', 'tcp-syn-sent-timeout': '30s', 'tcp-syn-received-timeout': '10s', 'tcp-established-timeout': '7200s' } },
       ];
-    case 9: // Stealth Mode - TTL Normalization
+    case 9: // Stealth Mode v2 — Anti-Detección Starlink/ISP completa
       return [
-        // Normalize all outgoing TTL to 64
+        // 1) TTL Normalization (oculta variedad de OS)
         { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', action: 'change-ttl', 'new-ttl': 'set:64', passthrough: 'yes', comment: 'NetAdmin Stealth: TTL normalize to 64' } },
-        // Normalize forwarded traffic TTL
         { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'forward', action: 'change-ttl', 'new-ttl': 'set:64', passthrough: 'yes', comment: 'NetAdmin Stealth: TTL forward normalize' } },
-        // Limit simultaneous connections per client (prevent detection by high conn count)
-        { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'tcp', 'connection-limit': '200,32', action: 'drop', comment: 'NetAdmin Stealth: Limit TCP conn/client' } },
-        { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'connection-limit': '100,32', action: 'drop', comment: 'NetAdmin Stealth: Limit UDP conn/client' } },
-        // Force consistent MSS for uniform packet fingerprint
-        { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': '1360', passthrough: 'yes', comment: 'NetAdmin Stealth: Uniform MSS 1360' } },
+        // 2) MSS uniforme 1380 (Starlink-safe + oculta MTU mixto interno)
+        { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': '1380', passthrough: 'yes', comment: 'NetAdmin Stealth: Uniform MSS 1380' } },
+        { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'forward', protocol: 'tcp', 'tcp-flags': 'syn', action: 'change-mss', 'new-mss': '1380', passthrough: 'yes', comment: 'NetAdmin Stealth: Uniform MSS forward' } },
+        // 3) Bloqueo QUIC/HTTP3 (evita multiplexado UDP que delata múltiples sesiones)
+        { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'dst-port': '443', action: 'drop', comment: 'NetAdmin Stealth: Block QUIC 443' } },
+        { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'dst-port': '80', action: 'drop', comment: 'NetAdmin Stealth: Block HTTP3 80' } },
+        // 4) Connection-limit por IP fuente (LAN) — simula un solo hogar
+        { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'tcp', 'connection-limit': '200,32', 'src-address': '192.168.0.0/16', action: 'drop', comment: 'NetAdmin Stealth: Limit TCP conn/host LAN' } },
+        { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', protocol: 'udp', 'connection-limit': '100,32', 'src-address': '192.168.0.0/16', action: 'drop', comment: 'NetAdmin Stealth: Limit UDP conn/host LAN' } },
+        // 5) NAT timeouts agresivos (evita acumulación de sesiones detectables)
+        { method: 'POST', endpoint: '/rest/ip/firewall/connection/tracking/set', body: { 'udp-timeout': '30s', 'udp-stream-timeout': '120s', 'tcp-established-timeout': '1h', 'tcp-time-wait-timeout': '10s', 'tcp-close-timeout': '10s', 'generic-timeout': '60s' } },
+        // 6) DROP TCP RST/FIN inválidos (Starlink usa esto para contar endpoints)
+        { method: 'PUT', endpoint: '/rest/ip/firewall/filter', body: { chain: 'forward', 'connection-state': 'invalid', action: 'drop', comment: 'NetAdmin Stealth: Drop invalid (anti-fingerprint)' } },
+        // 7) Forzar TCP window scaling/RFC1323 disable en mangle (homogeneiza huella)
+        { method: 'PUT', endpoint: '/rest/ip/firewall/mangle', body: { chain: 'postrouting', protocol: 'tcp', action: 'mark-packet', 'new-packet-mark': 'stealth-tcp', passthrough: 'no', comment: 'NetAdmin Stealth: Mark TCP uniforme' } },
       ];
     default:
       return [];
