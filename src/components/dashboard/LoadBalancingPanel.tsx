@@ -83,23 +83,13 @@ function generateFailoverBlock(wans: string[]): string {
 
   wans.forEach((wan, i) => {
     const pingIp = pingTargets[i % pingTargets.length];
-    // Add a static route for the ping target via this WAN so it always goes out the right interface
+    // Up/down scripts compactados en una sola línea para evitar problemas con el parser line-by-line.
+    const upScript = `:log warning \\"NetAdmin: ${wan} UP - restaurando rutas\\"; /ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no; /ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no`;
+    const downScript = `:log error \\"NetAdmin: ${wan} DOWN - activando failover\\"; /ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes; /ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes`;
     lines.push(
       `# --- Failover: ${wan} (ping ${pingIp}) ---`,
       `/ip route add dst-address=${pingIp}/32 gateway=${wan} scope=10 comment="NetAdmin Failover: Ping target ${wan}"`,
-      "",
-      `/tool netwatch add host=${pingIp} interval=10s timeout=3s \\`,
-      `  up-script="\\`,
-      `/log warning \\"NetAdmin: ${wan} UP - restaurando rutas\\";\\`,
-      `/ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no;\\`,
-      `/ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=no;\\`,
-      `" \\`,
-      `  down-script="\\`,
-      `/log error \\"NetAdmin: ${wan} DOWN - activando failover\\";\\`,
-      `/ip route set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes;\\`,
-      `/ip firewall mangle set [find comment~\\"NetAdmin.*${wan}\\"] disabled=yes;\\`,
-      `" \\`,
-      `  comment="NetAdmin Failover: Monitor ${wan}"`,
+      `/tool netwatch add host=${pingIp} interval=10s timeout=3s up-script="${upScript}" down-script="${downScript}" comment="NetAdmin Failover: Monitor ${wan}"`,
       "",
     );
   });
