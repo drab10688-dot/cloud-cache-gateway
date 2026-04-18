@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
-import { RemoteBlocklists } from "./RemoteBlocklists";
 import { NetAdminDomainEditor } from "./NetAdminDomainEditor";
 
 type FilterCategory = "all" | "mintic" | "infantil" | "coljuegos" | "manual";
@@ -391,10 +390,7 @@ export function DnsBlocklist() {
         <p className="text-sm text-muted-foreground mt-1">AdGuard + Unbound — Cumplimiento ISP Colombia (MinTIC / Coljuegos)</p>
       </div>
 
-      {/* NUEVO: Listas remotas (URLs) — gestión completa de filtros AdGuard */}
-      <RemoteBlocklists />
-
-      {/* NUEVO: Editor unificado NetAdmin — agregar/subir/listar/eliminar por categoría */}
+      {/* Editor unificado NetAdmin — agregar/subir/listar/eliminar por categoría */}
       <NetAdminDomainEditor />
 
       {/* Upload MinTIC/Coljuegos lists */}
