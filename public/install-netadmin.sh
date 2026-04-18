@@ -639,10 +639,12 @@ const BLOCKLIST_NAMES = {
   coljuegos: 'NetAdmin · Coljuegos Colombia',
   infantil:  'NetAdmin · Protección Infantil',
 };
-// AdGuard descarga los archivos por HTTP desde el nginx interno (172.20.0.x).
-// nginx también expone /blocklists/ públicamente para que se vean como listas normales.
-// Mantenemos la URL interna para que AdGuard no dependa de DNS público / Cloudflare.
-const BLOCKLIST_HTTP_BASE = 'http://netadmin-nginx/blocklists';
+// AdGuard descarga los archivos por HTTP desde el nginx interno.
+// IMPORTANTE: usamos la IP fija (172.20.0.19) en vez del hostname "netadmin-nginx"
+// porque AdGuard tiene su propio resolver DNS y NO usa el DNS interno de Docker (127.0.0.11).
+// Con el hostname falla con "no addresses for host netadmin-nginx" → 400 al registrar filtros.
+// La IP 172.20.0.19 está fijada en el docker-compose.yml más abajo (sección networks).
+const BLOCKLIST_HTTP_BASE = process.env.BLOCKLIST_HTTP_BASE || 'http://172.20.0.19/blocklists';
 const adguardUrlFor = (cat) => `${BLOCKLIST_HTTP_BASE}/netadmin_${cat}.txt`;
 
 function ensureBlocklistDir() {
