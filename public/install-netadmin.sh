@@ -659,7 +659,8 @@ function readCategory(category) {
         .map(line => line.trim())
         .filter(line => line && !line.startsWith('!') && !line.startsWith('#'))
         .map(line => normalizeDomain(line))
-        .filter(Boolean)
+        // Filtra el dominio seed invisible (placeholder cuando la categoría está vacía)
+        .filter(d => d && !d.startsWith('netadmin-placeholder-'))
     )];
   } catch {
     return [];
@@ -671,15 +672,19 @@ function writeCategory(category, domains) {
   if (!file) throw new Error(`Categoría inválida: ${category}`);
   ensureBlocklistDir();
   const unique = [...new Set(domains.map(d => normalizeDomain(d)).filter(Boolean))].sort();
-  // Formato Adblock estándar: AdGuard lo indexa en hash table (O(1) lookup)
+  // Seed invisible: garantiza que AdGuard NUNCA rechace la lista por estar vacía (HTTP 400 "no rules").
+  // Es un dominio .invalid (RFC 6761) que jamás resolverá → no afecta a nadie.
+  const seed = `netadmin-placeholder-${category}.invalid`;
+  const rules = unique.length > 0 ? unique.map(d => `||${d}^`) : [`||${seed}^`];
   const body = [
     `! Title: ${BLOCKLIST_NAMES[category]}`,
     `! Description: NetAdmin blocklist (${category}) — gestionado desde el panel`,
     `! Total: ${unique.length}`,
     `! Updated: ${new Date().toISOString()}`,
-    ...unique.map(d => `||${d}^`),
+    ...rules,
   ].join('\n');
   fs.writeFileSync(file, `${body}\n`);
+  try { fs.chmodSync(file, 0o644); } catch { /* ignore */ }
   return unique;
 }
 
@@ -760,7 +765,8 @@ async function ensureAdguardConfigured() {
   // 3. Registrar cada categoría (asegurando que el archivo exista en disco para que nginx lo sirva)
   for (const cat of BLOCKLIST_CATEGORIES) {
     const url = adguardUrlFor(cat);
-    if (!fs.existsSync(BLOCKLIST_FILES[cat])) writeCategory(cat, []);
+    // Re-escribe siempre: garantiza header válido + seed si está vacía (evita rechazo de AdGuard)
+    writeCategory(cat, readCategory(cat));
     if (!existingUrls2.has(url)) {
       try {
         await postAdguard('/control/filtering/add_url', {
@@ -768,9 +774,12 @@ async function ensureAdguardConfigured() {
           url,
           whitelist: false,
         });
+        console.log(`[blocklist] ✅ Registrado en AdGuard: ${cat} → ${url}`);
       } catch (e) {
-        console.warn(`[blocklist] No se pudo registrar ${cat}: ${e.message}`);
+        console.warn(`[blocklist] ❌ No se pudo registrar ${cat} (${url}): ${e.message}`);
       }
+    } else {
+      console.log(`[blocklist] ya existe en AdGuard: ${cat}`);
     }
   }
 }
@@ -1093,6 +1102,46 @@ app.post('/api/blocklist/bulk-remove', async (req, res) => {
     }
     if (removed > 0) await reloadAdguardFilters();
     res.json({ success: true, removed, requested: incoming.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Devuelve estado de las 4 categorías NetAdmin (count de dominios + si está registrada en AdGuard)
+app.get('/api/blocklist/categories', async (req, res) => {
+  const result = [];
+  let registeredUrls = new Set();
+  try {
+    const filtering = await adguardRequest('/control/filtering/status');
+    registeredUrls = new Set((filtering.filters || []).map(f => f.url));
+  } catch { /* AdGuard caído — devolvemos sólo los counts del disco */ }
+  for (const cat of BLOCKLIST_CATEGORIES) {
+    const url = adguardUrlFor(cat);
+    result.push({
+      category: cat,
+      name: BLOCKLIST_NAMES[cat],
+      url,
+      domain_count: readCategory(cat).length,
+      registered_in_adguard: registeredUrls.has(url),
+    });
+  }
+  res.json(result);
+});
+
+// Garantiza que las 4 listas NetAdmin estén registradas en AdGuard y refresca.
+// El frontend lo llama al hacer clic en cualquier chip NetAdmin (no necesita pasar URL).
+app.post('/api/blocklist/ensure', async (req, res) => {
+  try {
+    await ensureAdguardConfigured();
+    await postAdguard('/control/filtering/refresh', { whitelist: false });
+    const filtering = await adguardRequest('/control/filtering/status');
+    const registeredUrls = new Set((filtering.filters || []).map(f => f.url));
+    const status = BLOCKLIST_CATEGORIES.map(cat => ({
+      category: cat,
+      name: BLOCKLIST_NAMES[cat],
+      url: adguardUrlFor(cat),
+      registered: registeredUrls.has(adguardUrlFor(cat)),
+      domain_count: readCategory(cat).length,
+    }));
+    res.json({ success: true, status });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
