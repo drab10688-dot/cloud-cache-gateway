@@ -685,18 +685,33 @@ export function MikroTikPanel() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
                 <div className="bg-card rounded-md p-2 border border-border">
                   <p className="text-foreground font-semibold mb-1">🔍 TTL Variable</p>
-                  <p>Windows=128, Linux/Android=64, iOS=64. El proveedor ve distintos TTLs → múltiples dispositivos.</p>
-                  <p className="text-success mt-1">✓ Solución: Normalizar todo a TTL=64</p>
+                  <p>Windows=128, Linux=64, iOS=64. TTLs distintos delatan múltiples dispositivos.</p>
+                  <p className="text-success mt-1">✓ Normalizar a TTL=64</p>
                 </div>
                 <div className="bg-card rounded-md p-2 border border-border">
-                  <p className="text-foreground font-semibold mb-1">📊 Conexiones Masivas</p>
-                  <p>Un solo usuario no abre 500+ conexiones TCP simultáneas. Muchas = sospechoso.</p>
-                  <p className="text-success mt-1">✓ Solución: Limitar conn/cliente</p>
+                  <p className="text-foreground font-semibold mb-1">📦 MSS / MTU mixto</p>
+                  <p>Fibra=1500, PPPoE=1480, VPN=1400. Variedad delata clientes distintos.</p>
+                  <p className="text-success mt-1">✓ MSS uniforme 1380 (Starlink-safe)</p>
                 </div>
                 <div className="bg-card rounded-md p-2 border border-border">
-                  <p className="text-foreground font-semibold mb-1">📦 Fingerprint TCP</p>
-                  <p>El tamaño MSS varía entre OS. Patrón mixto = varios dispositivos.</p>
-                  <p className="text-success mt-1">✓ Solución: MSS uniforme 1360</p>
+                  <p className="text-foreground font-semibold mb-1">🎬 QUIC / HTTP3 (UDP 443)</p>
+                  <p>YouTube/Google multiplexan sesiones por QUIC → Starlink cuenta endpoints únicos.</p>
+                  <p className="text-success mt-1">✓ Bloquear UDP 443/80 → fuerza TCP</p>
+                </div>
+                <div className="bg-card rounded-md p-2 border border-border">
+                  <p className="text-foreground font-semibold mb-1">📊 Conexiones masivas</p>
+                  <p>Un hogar normal no abre 500+ conexiones TCP simultáneas.</p>
+                  <p className="text-success mt-1">✓ connection-limit por IP LAN</p>
+                </div>
+                <div className="bg-card rounded-md p-2 border border-border">
+                  <p className="text-foreground font-semibold mb-1">⏱️ Sesiones NAT acumuladas</p>
+                  <p>Tablas conntrack grandes con timeouts largos = patrón de carrier, no hogar.</p>
+                  <p className="text-success mt-1">✓ NAT timeouts agresivos (UDP 30s)</p>
+                </div>
+                <div className="bg-card rounded-md p-2 border border-border">
+                  <p className="text-foreground font-semibold mb-1">⚠️ Paquetes inválidos</p>
+                  <p>RST/FIN huérfanos revelan endpoints internos al pasar por NAT.</p>
+                  <p className="text-success mt-1">✓ Drop connection-state=invalid</p>
                 </div>
               </div>
             </div>
